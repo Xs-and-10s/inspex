@@ -128,6 +128,115 @@ defmodule Inspex do
     end
   end
 
+  # ===========================================================================
+  # Inspex.def/2 — global spec registration (Clojure s/def equivalent)
+  # ===========================================================================
+
+  @doc """
+  Registers a spec globally under `name` in the `Inspex.Registry`.
+
+  The Clojure spec equivalent of `s/def`. Specs registered this way are
+  accessible from any process via `ref/1`.
+
+      import Inspex
+
+      defspec :email,  string(:filled?, format: ~r/@/)
+      defspec :age,    integer(gte?: 0, lte?: 150)
+      defspec :role,   atom(in?: [:admin, :user, :guest])
+
+      user = schema(%{
+        required(:email) => ref(:email),
+        required(:age)   => ref(:age),
+        optional(:role)  => ref(:role)
+      })
+
+  ## When to use `defspec` vs `defschema`
+
+  - `defspec` is for **leaf specs** — primitives and combinators you want to
+    name and reuse across schemas.
+  - `defschema` is for **composite schemas** — generates callable functions in
+    the current module and is the ergonomic entry point for validation.
+  """
+  defmacro defspec(name, spec) when is_atom(name) do
+    quote do
+      Inspex.Registry.register(unquote(name), unquote(spec))
+    end
+  end
+
+  # ===========================================================================
+  # defschema — generates a named validator function (Peri-style ergonomics)
+  # ===========================================================================
+
+  @doc """
+  Defines a named schema and generates `name/1` and `name!/1` validator
+  functions in the calling module.
+
+  ## Usage
+
+      defmodule MyApp.Schemas do
+        import Inspex
+
+        defschema :user do
+          schema(%{
+            required(:name)  => string(:filled?),
+            required(:email) => ref(:email),
+            required(:age)   => integer(gte?: 18),
+            optional(:role)  => atom(in?: [:admin, :user])
+          })
+        end
+      end
+
+      MyApp.Schemas.user(%{name: "Mark", email: "m@x.com", age: 33})
+      #=> {:ok, %{name: "Mark", email: "m@x.com", age: 33}}
+
+      MyApp.Schemas.user!(%{name: "", age: 15})
+      #=> raises Inspex.ConformError
+
+  ## Generated functions
+
+  - `name/1`  — returns `{:ok, shaped_value}` or `{:error, [%Inspex.Error{}]}`
+  - `name!/1` — returns `shaped_value` or raises `Inspex.ConformError`
+
+  ## Registering a defschema globally
+
+  `defschema` does not automatically register the schema in the `Inspex.Registry`.
+  If you want to reference it via `ref/1`, call `Inspex.def/2` separately:
+
+      defschema :address do
+        schema(%{required(:street) => string(:filled?), required(:zip) => string(size?: 5)})
+      end
+
+      # Now ref(:address) works from other schemas
+      Inspex.def(:address, address(%{}))   # ← call your own function to get the schema struct
+
+  A cleaner approach: define the schema expression once as a module function:
+
+      def address_schema do
+        schema(%{required(:street) => string(:filled?), required(:zip) => string(size?: 5)})
+      end
+
+      defschema :address, do: address_schema()
+      # Then: Inspex.def(:address, address_schema())
+  """
+  defmacro defschema(name, do: schema_expr) when is_atom(name) do
+    bang = :"#{name}!"
+
+    quote do
+      @doc "Validates `data` against the `#{unquote(name)}` schema. Returns `{:ok, value}` or `{:error, errors}`."
+      def unquote(name)(data) do
+        Inspex.conform(unquote(schema_expr), data)
+      end
+
+      @doc "Like `#{unquote(name)}/1` but returns the shaped value or raises `Inspex.ConformError`."
+      def unquote(bang)(data) do
+        case unquote(name)(data) do
+          {:ok, value}     -> value
+          {:error, errors} -> raise Inspex.ConformError, name: unquote(name), errors: errors
+        end
+      end
+    end
+  end
+
   # `expr and expr` — recursively inline both sides
   defp to_bool_expr({:and, _, [left, right]}, v) do
     l = to_bool_expr(left, v)
