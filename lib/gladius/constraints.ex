@@ -1,7 +1,7 @@
-defmodule Inspex.Constraints do
+defmodule Gladius.Constraints do
   @moduledoc false
 
-  alias Inspex.Error
+  alias Gladius.Error
 
   @type constraint :: {atom(), term()}
 
@@ -94,6 +94,6 @@ defmodule Inspex.Constraints do
   # ---------------------------------------------------------------------------
 
   defp err(pred, value, message) do
-    %Inspex.Error{predicate: pred, value: value, message: message}
+    %Gladius.Error{predicate: pred, value: value, message: message}
   end
 end

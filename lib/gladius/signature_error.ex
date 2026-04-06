@@ -1,6 +1,6 @@
-defmodule Inspex.SignatureError do
+defmodule Gladius.SignatureError do
   @moduledoc """
-  Raised by `Inspex.Signature` when a function call violates its declared
+  Raised by `Gladius.Signature` when a function call violates its declared
   signature in `:dev` or `:test` environments.
 
   Never raised in `:prod` — signatures compile away to zero overhead.
@@ -11,7 +11,7 @@ defmodule Inspex.SignatureError do
   - `:function` — function name (atom)
   - `:arity`    — function arity (integer)
   - `:kind`     — `:args`, `:ret`, or `:fn`
-  - `:errors`   — `[%Inspex.Error{}]` with prefixed paths:
+  - `:errors`   — `[%Gladius.Error{}]` with prefixed paths:
       - args errors: path starts with `{:arg, index}` — e.g. `[{:arg, 0}, :email]`
       - ret errors:  path starts with `:ret`          — e.g. `[:ret, :name]`
       - fn errors:   path starts with `:fn`
@@ -47,7 +47,7 @@ defmodule Inspex.SignatureError do
     Enum.map_join(errors, "\n  ", &format_one/1)
   end
 
-  defp format_one(%Inspex.Error{path: path, message: msg}) do
+  defp format_one(%Gladius.Error{path: path, message: msg}) do
     "#{format_sig_path(path)}: #{msg}"
   end
 

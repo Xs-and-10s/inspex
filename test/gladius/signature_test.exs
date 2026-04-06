@@ -1,11 +1,11 @@
-defmodule Inspex.SignatureTest do
+defmodule Gladius.SignatureTest do
   use ExUnit.Case, async: true
 
   # ===========================================================================
   # Test subject modules
   #
   # We define helper modules inside the test file using Module.create or
-  # inline module definitions. Each module uses `use Inspex.Signature` so the
+  # inline module definitions. Each module uses `use Gladius.Signature` so the
   # def override is scoped only to that module — it does NOT affect the test
   # module itself.
   # ===========================================================================
@@ -14,7 +14,7 @@ defmodule Inspex.SignatureTest do
   # Basic: args and ret
   # ---------------------------------------------------------------------------
   defmodule BasicSubject do
-    use Inspex.Signature
+    use Gladius.Signature
 
     signature args: [string(:filled?), integer(gte?: 0)],
               ret:  string(:filled?)
@@ -22,7 +22,7 @@ defmodule Inspex.SignatureTest do
       String.duplicate("Hello #{name}! ", count)
     end
 
-    # Unsigned function — should not be affected by use Inspex.Signature
+    # Unsigned function — should not be affected by use Gladius.Signature
     def unsigned(x), do: x * 2
   end
 
@@ -32,7 +32,7 @@ defmodule Inspex.SignatureTest do
     end
 
     test "invalid arg raises SignatureError with :args kind" do
-      assert_raise Inspex.SignatureError, fn ->
+      assert_raise Gladius.SignatureError, fn ->
         BasicSubject.greet("", 2)   # empty string fails string(:filled?)
       end
     end
@@ -41,7 +41,7 @@ defmodule Inspex.SignatureTest do
       try do
         BasicSubject.greet("Mark", -1)   # -1 fails integer(gte?: 0)
       rescue
-        e in Inspex.SignatureError ->
+        e in Gladius.SignatureError ->
           assert e.kind == :args
           assert e.function == :greet
           assert e.arity == 2
@@ -56,7 +56,7 @@ defmodule Inspex.SignatureTest do
       try do
         BasicSubject.greet(42, 1)
       rescue
-        e in Inspex.SignatureError ->
+        e in Gladius.SignatureError ->
           assert e.kind == :args
           assert Enum.any?(e.errors, fn err ->
             match?([{:arg, 0} | _], err.path)
@@ -68,7 +68,7 @@ defmodule Inspex.SignatureTest do
       try do
         BasicSubject.greet(42, -1)   # arg[0] wrong type, arg[1] fails gte?: 0
       rescue
-        e in Inspex.SignatureError ->
+        e in Gladius.SignatureError ->
           assert e.kind == :args
           indices =
             e.errors
@@ -81,7 +81,7 @@ defmodule Inspex.SignatureTest do
 
     test "invalid return value raises SignatureError with :ret kind" do
       # greet/2 returns "" when count is 0 (empty string fails :filled? on ret)
-      assert_raise Inspex.SignatureError, fn ->
+      assert_raise Gladius.SignatureError, fn ->
         BasicSubject.greet("Mark", 0)
       end
     end
@@ -90,7 +90,7 @@ defmodule Inspex.SignatureTest do
       try do
         BasicSubject.greet("Mark", 0)
       rescue
-        e in Inspex.SignatureError ->
+        e in Gladius.SignatureError ->
           assert e.kind == :ret
           assert e.function == :greet
           assert Enum.any?(e.errors, fn err ->
@@ -108,7 +108,7 @@ defmodule Inspex.SignatureTest do
   # Multi-clause function
   # ---------------------------------------------------------------------------
   defmodule MultiClause do
-    use Inspex.Signature
+    use Gladius.Signature
 
     signature args: [integer()], ret: integer()
     def fact(0), do: 1
@@ -125,7 +125,7 @@ defmodule Inspex.SignatureTest do
     end
 
     test "arg violation raises SignatureError" do
-      assert_raise Inspex.SignatureError, fn ->
+      assert_raise Gladius.SignatureError, fn ->
         MultiClause.fact("not an integer")
       end
     end
@@ -135,7 +135,7 @@ defmodule Inspex.SignatureTest do
   # Zero-arity function (ret only)
   # ---------------------------------------------------------------------------
   defmodule ZeroArity do
-    use Inspex.Signature
+    use Gladius.Signature
 
     signature ret: string(:filled?)
     def config_key, do: "my_key"
@@ -150,7 +150,7 @@ defmodule Inspex.SignatureTest do
     end
 
     test "invalid return raises SignatureError" do
-      assert_raise Inspex.SignatureError, fn ->
+      assert_raise Gladius.SignatureError, fn ->
         ZeroArity.bad_key()
       end
     end
@@ -160,7 +160,7 @@ defmodule Inspex.SignatureTest do
   # :fn relationship constraint
   # ---------------------------------------------------------------------------
   defmodule WithFnConstraint do
-    use Inspex.Signature
+    use Gladius.Signature
 
     signature args: [integer(), integer()],
               ret:  integer(),
@@ -175,7 +175,7 @@ defmodule Inspex.SignatureTest do
 
     test ":fn violation raises SignatureError with :fn kind" do
       defmodule FnViolator do
-        use Inspex.Signature
+        use Gladius.Signature
 
         signature args: [integer()],
                   ret:  integer(),
@@ -183,14 +183,14 @@ defmodule Inspex.SignatureTest do
         def identity(_n), do: 99
       end
 
-      assert_raise Inspex.SignatureError, fn ->
+      assert_raise Gladius.SignatureError, fn ->
         FnViolator.identity(1)
       end
 
       try do
         FnViolator.identity(1)
       rescue
-        e in Inspex.SignatureError -> assert e.kind == :fn
+        e in Gladius.SignatureError -> assert e.kind == :fn
       end
     end
   end
@@ -199,7 +199,7 @@ defmodule Inspex.SignatureTest do
   # ref/1 in signature specs (registry integration)
   # ---------------------------------------------------------------------------
   defmodule WithRef do
-    use Inspex.Signature
+    use Gladius.Signature
 
     signature args: [ref(:sig_test_email)],
               ret:  boolean()
@@ -208,8 +208,8 @@ defmodule Inspex.SignatureTest do
 
   describe "ref/1 in signature" do
     setup do
-      Inspex.Registry.register_local(:sig_test_email, Inspex.string(:filled?, format: ~r/@/))
-      on_exit(&Inspex.Registry.clear_local/0)
+      Gladius.Registry.register_local(:sig_test_email, Gladius.string(:filled?, format: ~r/@/))
+      on_exit(&Gladius.Registry.clear_local/0)
     end
 
     test "valid email passes args check" do
@@ -217,7 +217,7 @@ defmodule Inspex.SignatureTest do
     end
 
     test "invalid arg raises SignatureError" do
-      assert_raise Inspex.SignatureError, fn ->
+      assert_raise Gladius.SignatureError, fn ->
         WithRef.valid_email?("notanemail")
       end
     end
@@ -227,7 +227,7 @@ defmodule Inspex.SignatureTest do
   # Coercion in signature specs
   # ---------------------------------------------------------------------------
   defmodule WithCoercion do
-    use Inspex.Signature
+    use Gladius.Signature
 
     signature args: [coerce(integer(gte?: 0), from: :string)],
               ret:  string(:filled?)
@@ -245,7 +245,7 @@ defmodule Inspex.SignatureTest do
     end
 
     test "invalid string raises SignatureError" do
-      assert_raise Inspex.SignatureError, fn ->
+      assert_raise Gladius.SignatureError, fn ->
         WithCoercion.times_two("bad")
       end
     end
@@ -259,9 +259,9 @@ defmodule Inspex.SignatureTest do
       try do
         BasicSubject.greet(42, 1)
       rescue
-        e in Inspex.SignatureError ->
+        e in Gladius.SignatureError ->
           msg = Exception.message(e)
-          assert msg =~ "Inspex.SignatureTest.BasicSubject"
+          assert msg =~ "Gladius.SignatureTest.BasicSubject"
           assert msg =~ "greet/2"
           assert msg =~ "argument[0]"
       end
@@ -271,7 +271,7 @@ defmodule Inspex.SignatureTest do
       try do
         BasicSubject.greet("Mark", 0)
       rescue
-        e in Inspex.SignatureError ->
+        e in Gladius.SignatureError ->
           msg = Exception.message(e)
           assert msg =~ "greet/2"
           assert msg =~ "return"
@@ -283,8 +283,8 @@ defmodule Inspex.SignatureTest do
   # Path threading — schema args expose nested field paths
   # ---------------------------------------------------------------------------
   defmodule WithSchemaArg do
-    use Inspex.Signature
-    import Inspex
+    use Gladius.Signature
+    import Gladius
 
     signature args: [schema(%{
                 required(:name)  => string(:filled?),
@@ -299,7 +299,7 @@ defmodule Inspex.SignatureTest do
       try do
         WithSchemaArg.validate(%{name: "", email: "not-an-email"})
       rescue
-        e in Inspex.SignatureError ->
+        e in Gladius.SignatureError ->
           assert e.kind == :args
           paths = Enum.map(e.errors, & &1.path)
           assert [{:arg, 0}, :name] in paths
@@ -311,7 +311,7 @@ defmodule Inspex.SignatureTest do
       try do
         WithSchemaArg.validate(%{name: "", email: "not-an-email"})
       rescue
-        e in Inspex.SignatureError ->
+        e in Gladius.SignatureError ->
           msg = Exception.message(e)
           assert msg =~ "argument[0][:name]"
           assert msg =~ "argument[0][:email]"
@@ -327,7 +327,7 @@ defmodule Inspex.SignatureTest do
   # Signature does not affect defp or other macros
   # ---------------------------------------------------------------------------
   defmodule WithPrivate do
-    use Inspex.Signature
+    use Gladius.Signature
 
     signature args: [integer()], ret: integer()
     def double(n), do: helper(n)

@@ -1,4 +1,4 @@
-defmodule Inspex.Signature do
+defmodule Gladius.Signature do
   @moduledoc """
   Runtime function signature validation, inspired by Clojure's `s/fdef`.
 
@@ -8,7 +8,7 @@ defmodule Inspex.Signature do
   ## Setup
 
       defmodule MyApp.Users do
-        use Inspex.Signature
+        use Gladius.Signature
 
         signature args: [string(:filled?), integer(gte?: 18)],
                   ret:  boolean()
@@ -18,7 +18,7 @@ defmodule Inspex.Signature do
       end
 
   Note: `signature` is a **macro**, not a module attribute — write it without
-  `@`. You do not need `import Inspex` in the module; the generated code
+  `@`. You do not need `import Gladius` in the module; the generated code
   imports it internally.
 
   ## Options
@@ -43,7 +43,7 @@ defmodule Inspex.Signature do
   defmacro __using__(_opts) do
     quote do
       import Kernel, except: [def: 2]
-      import Inspex.Signature, only: [def: 2, signature: 1]
+      import Gladius.Signature, only: [def: 2, signature: 1]
     end
   end
 
@@ -57,7 +57,7 @@ defmodule Inspex.Signature do
 
   defmacro signature(opts) do
     if Mix.env() in [:dev, :test] do
-      Module.put_attribute(__CALLER__.module, :__inspex_pending_sig__, opts)
+      Module.put_attribute(__CALLER__.module, :__gladius_pending_sig__, opts)
     end
     :ok
   end
@@ -68,7 +68,7 @@ defmodule Inspex.Signature do
   # All Module.put/get_attribute calls are in the macro body (not in quote),
   # so they all run at expansion time — consistent with signature/1 above.
   #
-  # :__inspex_signed__ is managed as a plain list manually rather than using
+  # :__gladius_signed__ is managed as a plain list manually rather than using
   # accumulate: true.  The accumulate: true registration lives in quote do
   # (evaluation time), so it may not have fired by the time the first def
   # expansion tries to put a value — leaving the attribute non-accumulating
@@ -80,15 +80,15 @@ defmodule Inspex.Signature do
     module = __CALLER__.module
 
     if Mix.env() in [:dev, :test] do
-      pending = Module.get_attribute(module, :__inspex_pending_sig__)
-      signed  = Module.get_attribute(module, :__inspex_signed__) || []
+      pending = Module.get_attribute(module, :__gladius_pending_sig__)
+      signed  = Module.get_attribute(module, :__gladius_signed__) || []
       {name, arity} = extract_name_arity(call)
       already_signed = Enum.any?(signed, &match?({^name, ^arity}, &1))
 
       cond do
         pending != nil ->
-          Module.put_attribute(module, :__inspex_signed__, [{name, arity} | signed])
-          Module.put_attribute(module, :__inspex_pending_sig__, nil)
+          Module.put_attribute(module, :__gladius_signed__, [{name, arity} | signed])
+          Module.put_attribute(module, :__gladius_pending_sig__, nil)
           impl_call = rename_call(call, impl_name(name, arity))
           wrapper   = generate_wrapper(name, arity, pending)
           quote do
@@ -114,7 +114,7 @@ defmodule Inspex.Signature do
   # opts_ast: the raw opts AST stored by signature/1.
   # `unquote(opts_ast)` in the wrapper body splices it as code — spec builders
   # are called at each invocation of the public function (runtime).
-  # `import Inspex` puts string/1, integer/1 etc. in scope for those calls.
+  # `import Gladius` puts string/1, integer/1 etc. in scope for those calls.
   #
   # Kernel.def is used (not bare def) so the module's own import does not
   # re-intercept the wrapper and rename it to defp.
@@ -127,7 +127,7 @@ defmodule Inspex.Signature do
 
     quote do
       Kernel.def unquote(name)(unquote_splicing(splat)) do
-        import Inspex, warn: false
+        import Gladius, warn: false
         __sig__      = unquote(opts_ast)
         __raw_args__ = unquote(splat)
 
@@ -135,7 +135,7 @@ defmodule Inspex.Signature do
           case Keyword.get(__sig__, :args) do
             nil       -> __raw_args__
             args_spec ->
-              Inspex.Signature.__coerce_and_check_args__(
+              Gladius.Signature.__coerce_and_check_args__(
                 __raw_args__, args_spec, __MODULE__, unquote(name), unquote(arity)
               )
           end
@@ -146,7 +146,7 @@ defmodule Inspex.Signature do
         case Keyword.get(__sig__, :ret) do
           nil      -> :ok
           ret_spec ->
-            Inspex.Signature.__check_ret__(
+            Gladius.Signature.__check_ret__(
               __result__, ret_spec, __MODULE__, unquote(name), unquote(arity)
             )
         end
@@ -154,7 +154,7 @@ defmodule Inspex.Signature do
         case Keyword.get(__sig__, :fn) do
           nil     -> :ok
           fn_spec ->
-            Inspex.Signature.__check_fn__(
+            Gladius.Signature.__check_fn__(
               __args__, __result__, fn_spec, __MODULE__, unquote(name), unquote(arity)
             )
         end
@@ -164,7 +164,7 @@ defmodule Inspex.Signature do
     end
   end
 
-  defp impl_name(name, arity), do: :"__inspex_impl_#{name}_#{arity}__"
+  defp impl_name(name, arity), do: :"__gladius_impl_#{name}_#{arity}__"
 
   defp extract_name_arity({:when, _, [{name, _, args} | _]}),
     do: {name, length(args || [])}
@@ -195,7 +195,7 @@ defmodule Inspex.Signature do
       |> Enum.zip(args_specs)
       |> Enum.with_index()
       |> Enum.map(fn {{arg, spec}, idx} ->
-        case Inspex.conform(spec, arg) do
+        case Gladius.conform(spec, arg) do
           {:ok, coerced}   -> {:ok, coerced}
           {:error, errors} -> {:error, prefix_paths(errors, {:arg, idx})}
         end
@@ -209,7 +209,7 @@ defmodule Inspex.Signature do
     if all_errors == [] do
       Enum.map(results, fn {:ok, v} -> v end)
     else
-      raise Inspex.SignatureError,
+      raise Gladius.SignatureError,
         module: module, function: function, arity: arity,
         kind: :args, errors: all_errors
     end
@@ -217,10 +217,10 @@ defmodule Inspex.Signature do
 
   @doc false
   def __check_ret__(result, ret_spec, module, function, arity) do
-    case Inspex.conform(ret_spec, result) do
+    case Gladius.conform(ret_spec, result) do
       {:ok, _}         -> :ok
       {:error, errors} ->
-        raise Inspex.SignatureError,
+        raise Gladius.SignatureError,
           module: module, function: function, arity: arity,
           kind: :ret, errors: prefix_paths(errors, :ret)
     end
@@ -228,10 +228,10 @@ defmodule Inspex.Signature do
 
   @doc false
   def __check_fn__(args, result, fn_spec, module, function, arity) do
-    case Inspex.conform(fn_spec, {args, result}) do
+    case Gladius.conform(fn_spec, {args, result}) do
       {:ok, _}         -> :ok
       {:error, errors} ->
-        raise Inspex.SignatureError,
+        raise Gladius.SignatureError,
           module: module, function: function, arity: arity,
           kind: :fn, errors: prefix_paths(errors, :fn)
     end

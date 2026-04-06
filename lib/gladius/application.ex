@@ -1,12 +1,12 @@
-defmodule Inspex.Application do
+defmodule Gladius.Application do
   @moduledoc false
   use Application
 
   @impl true
   def start(_type, _args) do
-    children = [Inspex.Registry]
+    children = [Gladius.Registry]
 
-    opts = [strategy: :one_for_one, name: Inspex.Supervisor]
+    opts = [strategy: :one_for_one, name: Gladius.Supervisor]
     Supervisor.start_link(children, opts)
   end
 end

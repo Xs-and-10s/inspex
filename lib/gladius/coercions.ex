@@ -1,6 +1,6 @@
-defmodule Inspex.Coercions do
+defmodule Gladius.Coercions do
   @moduledoc """
-  Built-in coercion functions for use with `Inspex.coerce/2`.
+  Built-in coercion functions for use with `Gladius.coerce/2`.
 
   All coercions are **idempotent** — if the value is already the target type
   they return `{:ok, value}` unchanged, so you never need to special-case
@@ -27,7 +27,7 @@ defmodule Inspex.Coercions do
   Register application-specific coercions at startup:
 
       # In your Application.start/2 or a module's @on_load:
-      Inspex.Coercions.register({:decimal, :float}, fn
+      Gladius.Coercions.register({:decimal, :float}, fn
         %Decimal{} = d -> {:ok, Decimal.to_float(d)}
         v when is_float(v) -> {:ok, v}
         v -> {:error, "cannot coerce \#{inspect(v)} to float"}
@@ -194,7 +194,7 @@ defmodule Inspex.Coercions do
   Should be called once at application startup (e.g. in `Application.start/2`)
   because `:persistent_term` writes trigger a global GC pass.
 
-      Inspex.Coercions.register({:decimal, :float}, fn
+      Gladius.Coercions.register({:decimal, :float}, fn
         %Decimal{} = d -> {:ok, Decimal.to_float(d)}
         v when is_float(v) -> {:ok, v}
         v -> {:error, "cannot coerce \#{inspect(v)} to float"}
@@ -273,7 +273,7 @@ defmodule Inspex.Coercions do
     #{user_section}
     Register a custom coercion:
 
-        Inspex.Coercions.register({#{inspect(source)}, #{inspect(target)}}, fn value ->
+        Gladius.Coercions.register({#{inspect(source)}, #{inspect(target)}}, fn value ->
           # return {:ok, coerced} or {:error, "reason"}
         end)
     """

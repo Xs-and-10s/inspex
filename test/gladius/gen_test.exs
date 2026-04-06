@@ -1,16 +1,16 @@
-defmodule Inspex.GenTest do
+defmodule Gladius.GenTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
   # StreamData (imported by ExUnitProperties) exports several names that clash
-  # with Inspex's type builders: integer/0-2, float/0-2, string/0-2,
+  # with Gladius's type builders: integer/0-2, float/0-2, string/0-2,
   # boolean/0, atom/0-1, list/0-2, list_of/1. We exclude those from the
-  # Inspex import and use the Inspex. prefix for them explicitly in tests.
+  # Gladius import and use the Gladius. prefix for them explicitly in tests.
   #
-  # Non-clashing Inspex functions (gen, valid?, conform, schema, ref, maybe,
+  # Non-clashing Gladius functions (gen, valid?, conform, schema, ref, maybe,
   # any_of, all_of, not_spec, cond_spec, coerce, spec, nil_spec, any, etc.)
   # are imported freely.
-  import Inspex, except: [
+  import Gladius, except: [
     integer: 0, integer: 1, integer: 2,
     float:   0, float:   1, float:   2,
     string:  0, string:  1, string:  2,
@@ -22,14 +22,14 @@ defmodule Inspex.GenTest do
   ]
 
   # Short aliases for the clashing builders — keeps test bodies readable.
-  defp i(cs \\ []),  do: Inspex.integer(cs)
-  defp f(cs \\ []),  do: Inspex.float(cs)
-  defp s(cs \\ []),  do: Inspex.string(cs)
-  defp s(c, more),   do: Inspex.string(c, more)
-  defp b(),          do: Inspex.boolean()
-  defp a(cs),        do: Inspex.atom(cs)
-  defp lo(el_spec),  do: Inspex.list_of(el_spec)
-  defp g(spec),      do: Inspex.gen(spec)
+  defp i(cs \\ []),  do: Gladius.integer(cs)
+  defp f(cs \\ []),  do: Gladius.float(cs)
+  defp s(cs \\ []),  do: Gladius.string(cs)
+  defp s(c, more),   do: Gladius.string(c, more)
+  defp b(),          do: Gladius.boolean()
+  defp a(cs),        do: Gladius.atom(cs)
+  defp lo(el_spec),  do: Gladius.list_of(el_spec)
+  defp g(spec),      do: Gladius.gen(spec)
 
   # ---------------------------------------------------------------------------
   # Helper: every generated value must conform to the spec.
@@ -199,7 +199,7 @@ defmodule Inspex.GenTest do
     end
 
     test "raises for empty any_of" do
-      assert_raise Inspex.GeneratorError, fn -> g(any_of([])) end
+      assert_raise Gladius.GeneratorError, fn -> g(any_of([])) end
     end
   end
 
@@ -293,16 +293,16 @@ defmodule Inspex.GenTest do
 
   describe "ref/1" do
     setup do
-      on_exit(&Inspex.Registry.clear_local/0)
+      on_exit(&Gladius.Registry.clear_local/0)
     end
 
     property "resolves from registry and generates" do
-      Inspex.Registry.register_local(:gen_age, i(gte?: 0, lte?: 120))
+      Gladius.Registry.register_local(:gen_age, i(gte?: 0, lte?: 120))
       check all v <- g(ref(:gen_age)), do: assert is_integer(v) and v in 0..120
     end
 
     test "raises UndefinedSpecError for unregistered refs" do
-      assert_raise Inspex.UndefinedSpecError, fn -> g(ref(:no_such_spec_xyzzy)) end
+      assert_raise Gladius.UndefinedSpecError, fn -> g(ref(:no_such_spec_xyzzy)) end
     end
   end
 
@@ -323,11 +323,11 @@ defmodule Inspex.GenTest do
     end
 
     test "raises GeneratorError for predicate-only spec without :gen" do
-      assert_raise Inspex.GeneratorError, fn -> g(spec(fn x -> rem(x, 2) == 0 end)) end
+      assert_raise Gladius.GeneratorError, fn -> g(spec(fn x -> rem(x, 2) == 0 end)) end
     end
 
     test "raises GeneratorError for guard-style spec without :gen" do
-      assert_raise Inspex.GeneratorError, fn -> g(spec(is_integer() and &(&1 > 0))) end
+      assert_raise Gladius.GeneratorError, fn -> g(spec(is_integer() and &(&1 > 0))) end
     end
   end
 
@@ -337,11 +337,11 @@ defmodule Inspex.GenTest do
 
   describe "non-inferable specs" do
     test "not_spec raises GeneratorError" do
-      assert_raise Inspex.GeneratorError, fn -> g(not_spec(i())) end
+      assert_raise Gladius.GeneratorError, fn -> g(not_spec(i())) end
     end
 
     test "cond_spec raises GeneratorError" do
-      assert_raise Inspex.GeneratorError, fn -> g(cond_spec(&is_integer/1, i(), s())) end
+      assert_raise Gladius.GeneratorError, fn -> g(cond_spec(&is_integer/1, i(), s())) end
     end
   end
 

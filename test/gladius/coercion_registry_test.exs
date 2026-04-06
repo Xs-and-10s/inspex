@@ -1,10 +1,10 @@
-defmodule Inspex.CoercionRegistryTest do
+defmodule Gladius.CoercionRegistryTest do
   # persistent_term is global state that can't be cleaned up between tests —
   # async: false prevents cross-test contamination.
   use ExUnit.Case, async: false
 
-  import Inspex
-  alias Inspex.Coercions
+  import Gladius
+  alias Gladius.Coercions
 
   # ---------------------------------------------------------------------------
   # register/2 and registered/0

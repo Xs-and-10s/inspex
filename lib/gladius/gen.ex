@@ -1,8 +1,8 @@
-defmodule Inspex.Gen do
+defmodule Gladius.Gen do
   @moduledoc """
-  Generator inference for `inspex` specs.
+  Generator inference for `gladius` specs.
 
-  Converts a spec into a `StreamData` generator. Used via `Inspex.gen/1`.
+  Converts a spec into a `StreamData` generator. Used via `Gladius.gen/1`.
 
   ## Inference rules
 
@@ -19,9 +19,9 @@ defmodule Inspex.Gen do
   | `schema(%{...})`           | `StreamData.fixed_map` of each key's generator   |
   | `ref(:name)`               | resolves from registry, then infers              |
   | `spec(pred, gen: g)`       | uses the explicit `g` override                   |
-  | `spec(pred)`               | raises `Inspex.GeneratorError`                   |
-  | `not_spec(_)`              | raises `Inspex.GeneratorError`                   |
-  | `cond_spec(...)`           | raises `Inspex.GeneratorError`                   |
+  | `spec(pred)`               | raises `Gladius.GeneratorError`                   |
+  | `not_spec(_)`              | raises `Gladius.GeneratorError`                   |
+  | `cond_spec(...)`           | raises `Gladius.GeneratorError`                   |
 
   ## Constraints → bounds
 
@@ -35,7 +35,7 @@ defmodule Inspex.Gen do
   with a generous `max_tries` cap.
   """
 
-  alias Inspex.{Spec, All, Any, Not, Maybe, Ref, ListOf, Cond, Schema, SchemaKey}
+  alias Gladius.{Spec, All, Any, Not, Maybe, Ref, ListOf, Cond, Schema, SchemaKey}
 
   # ---------------------------------------------------------------------------
   # Public entry point
@@ -44,13 +44,13 @@ defmodule Inspex.Gen do
   @doc """
   Returns a `StreamData` generator for `spec`.
 
-  Raises `Inspex.GeneratorError` for specs whose generators cannot be inferred
+  Raises `Gladius.GeneratorError` for specs whose generators cannot be inferred
   (predicate-only specs, `not_spec/1`, `cond_spec/3`).
 
   ## Property-based testing usage
 
       use ExUnitProperties
-      import Inspex, except: [integer: 0, integer: 1, integer: 2,
+      import Gladius, except: [integer: 0, integer: 1, integer: 2,
                                float: 0, float: 1, float: 2,
                                string: 0, string: 1, string: 2,
                                boolean: 0, atom: 0, atom: 1,
@@ -61,12 +61,12 @@ defmodule Inspex.Gen do
           required(:name) => string(:filled?),
           required(:age)  => integer(gte?: 18, lte?: 120)
         })
-        check all value <- Inspex.gen(spec) do
-          assert Inspex.valid?(spec, value)
+        check all value <- Gladius.gen(spec) do
+          assert Gladius.valid?(spec, value)
         end
       end
   """
-  @spec gen(Inspex.conformable()) :: term()
+  @spec gen(Gladius.conformable()) :: term()
   @doc false
   def gen(%Spec{generator: g}) when not is_nil(g), do: g
 
@@ -98,7 +98,7 @@ defmodule Inspex.Gen do
   # Predicate-only spec — cannot infer
   def gen(%Spec{type: nil, predicate: pred, meta: meta}) when not is_nil(pred) do
     source = Map.get(meta, :source, "anonymous predicate")
-    raise Inspex.GeneratorError, spec: source
+    raise Gladius.GeneratorError, spec: source
   end
 
   # Empty spec — treat as any()
@@ -121,16 +121,16 @@ defmodule Inspex.Gen do
     # which without merging would generate up to 1,000,000 and filter to 1..100.
     {mergeable, rest} =
       case head do
-        %Inspex.Spec{type: type, predicate: nil} when not is_nil(type) ->
+        %Gladius.Spec{type: type, predicate: nil} when not is_nil(type) ->
           Enum.split_with(tail, fn
-            %Inspex.Spec{type: ^type, predicate: nil} -> true
+            %Gladius.Spec{type: ^type, predicate: nil} -> true
             _ -> false
           end)
         _ -> {[], tail}
       end
 
     merged_head =
-      Enum.reduce(mergeable, head, fn %Inspex.Spec{constraints: cs}, acc ->
+      Enum.reduce(mergeable, head, fn %Gladius.Spec{constraints: cs}, acc ->
         %{acc | constraints: acc.constraints ++ cs}
       end)
 
@@ -140,14 +140,14 @@ defmodule Inspex.Gen do
       base
     else
       StreamData.filter(base, fn v ->
-        Enum.all?(rest, &Inspex.valid?(&1, v))
+        Enum.all?(rest, &Gladius.valid?(&1, v))
       end, 100)
     end
   end
 
   # Any (OR) — weighted uniform choice over each spec's generator.
   def gen(%Any{specs: []}) do
-    raise Inspex.GeneratorError, spec: "any_of([])"
+    raise Gladius.GeneratorError, spec: "any_of([])"
   end
 
   def gen(%Any{specs: specs}) do
@@ -156,7 +156,7 @@ defmodule Inspex.Gen do
 
   # Not — cannot infer without a base type to generate from.
   def gen(%Not{}) do
-    raise Inspex.GeneratorError,
+    raise Gladius.GeneratorError,
       spec: "not_spec/1 — no base type to generate from. " <>
             "Wrap in all_of([typed_spec, not_spec(...)]) to give the generator a domain."
   end
@@ -168,7 +168,7 @@ defmodule Inspex.Gen do
 
   # Ref — resolve from registry at gen-time, then infer.
   def gen(%Ref{name: name}) do
-    spec = Inspex.Registry.fetch!(name)
+    spec = Gladius.Registry.fetch!(name)
     gen(spec)
   end
 
@@ -179,7 +179,7 @@ defmodule Inspex.Gen do
 
   # Cond — cannot infer; the predicate splits based on runtime data.
   def gen(%Cond{}) do
-    raise Inspex.GeneratorError,
+    raise Gladius.GeneratorError,
       spec: "cond_spec/3 — branching depends on runtime values. " <>
             "Use any_of([if_spec_gen, else_spec_gen]) as an approximation, " <>
             "or provide an explicit generator."

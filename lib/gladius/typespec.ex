@@ -1,6 +1,6 @@
-defmodule Inspex.Typespec do
+defmodule Gladius.Typespec do
   @moduledoc """
-  Converts `inspex` specs to Elixir typespec AST.
+  Converts `gladius` specs to Elixir typespec AST.
 
   ## Fidelity
 
@@ -20,45 +20,45 @@ defmodule Inspex.Typespec do
   ## Usage
 
       # Ad-hoc conversion
-      Inspex.to_typespec(integer(gte?: 0))
+      Gladius.to_typespec(integer(gte?: 0))
       #=> {non_neg_integer, [], []}    (quoted AST for non_neg_integer())
 
-      Macro.to_string(Inspex.to_typespec(maybe(string())))
+      Macro.to_string(Gladius.to_typespec(maybe(string())))
       #=> "String.t() | nil"
 
       # Generate a @type declaration AST (for use inside macros)
-      Inspex.Typespec.type_ast(:user_id, integer(gte?: 1))
+      Gladius.Typespec.type_ast(:user_id, integer(gte?: 1))
       # Produces AST equivalent to: @type user_id :: pos_integer()
   """
 
-  alias Inspex.{Spec, All, Any, Not, Maybe, Ref, ListOf, Cond, Schema, SchemaKey}
+  alias Gladius.{Spec, All, Any, Not, Maybe, Ref, ListOf, Cond, Schema, SchemaKey}
 
   # ===========================================================================
   # to_typespec/1
   # ===========================================================================
 
   @doc """
-  Converts an inspex spec to quoted Elixir typespec AST.
+  Converts an gladius spec to quoted Elixir typespec AST.
 
   Always returns a valid quoted form. Lossy constructs fall back to `term()`.
   Use `lossiness/1` to inspect what was elided.
 
   ## Examples
 
-      iex> import Inspex
-      iex> Macro.to_string(Inspex.to_typespec(string()))
+      iex> import Gladius
+      iex> Macro.to_string(Gladius.to_typespec(string()))
       "String.t()"
 
-      iex> Macro.to_string(Inspex.to_typespec(integer(gte?: 0, lte?: 100)))
+      iex> Macro.to_string(Gladius.to_typespec(integer(gte?: 0, lte?: 100)))
       "0..100"
 
-      iex> Macro.to_string(Inspex.to_typespec(maybe(string(:filled?))))
+      iex> Macro.to_string(Gladius.to_typespec(maybe(string(:filled?))))
       "String.t() | nil"
 
-      iex> Macro.to_string(Inspex.to_typespec(atom(in?: [:admin, :user])))
+      iex> Macro.to_string(Gladius.to_typespec(atom(in?: [:admin, :user])))
       ":admin | :user"
   """
-  @spec to_typespec(Inspex.conformable()) :: Macro.t()
+  @spec to_typespec(Gladius.conformable()) :: Macro.t()
 
   # ---------------------------------------------------------------------------
   # Coerce wrapper — use the inner spec's typespec.
@@ -178,16 +178,16 @@ defmodule Inspex.Typespec do
 
   ## Examples
 
-      iex> Inspex.typespec_lossiness(Inspex.string(:filled?))
+      iex> Gladius.typespec_lossiness(Gladius.string(:filled?))
       [{:constraint_not_expressible, "filled?: true has no typespec equivalent"}]
 
-      iex> Inspex.typespec_lossiness(Inspex.integer(gte?: 0, lte?: 100))
+      iex> Gladius.typespec_lossiness(Gladius.integer(gte?: 0, lte?: 100))
       []
 
-      iex> Inspex.typespec_lossiness(Inspex.not_spec(Inspex.integer()))
+      iex> Gladius.typespec_lossiness(Gladius.not_spec(Gladius.integer()))
       [{:negation_not_expressible, "not_spec has no typespec equivalent; term() used"}]
   """
-  @spec lossiness(Inspex.conformable()) :: [{atom(), String.t()}]
+  @spec lossiness(Gladius.conformable()) :: [{atom(), String.t()}]
   def lossiness(spec), do: collect_lossiness(spec) |> Enum.uniq()
 
   # ===========================================================================
@@ -204,14 +204,14 @@ defmodule Inspex.Typespec do
 
       # Inside a macro:
       quote do
-        unquote(Inspex.Typespec.type_ast(:user_id, Inspex.integer(gte?: 1)))
+        unquote(Gladius.Typespec.type_ast(:user_id, Gladius.integer(gte?: 1)))
       end
       # Equivalent to: @type user_id :: pos_integer()
 
       # Or at runtime:
-      Module.eval_quoted(MyModule, Inspex.Typespec.type_ast(:email, email_spec))
+      Module.eval_quoted(MyModule, Gladius.Typespec.type_ast(:email, email_spec))
   """
-  @spec type_ast(atom(), Inspex.conformable()) :: Macro.t()
+  @spec type_ast(atom(), Gladius.conformable()) :: Macro.t()
   def type_ast(name, spec) when is_atom(name) do
     ts = to_typespec(spec)
     {:@, [], [{:type, [], [{:":::", [], [{name, [], []}, ts]}]}]}

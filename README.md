@@ -1,9 +1,9 @@
-# Inspex
+# Gladius
 
 **Parse, don't validate.** `conform/2` returns a *shaped* value on success — coercions applied, data restructured — not just `true`. Specs are composable structs, not modules. Write a spec once; use it to validate, generate test data, check function signatures, and produce typespecs.
 
-[![Hex.pm](https://img.shields.io/hexpm/v/inspex.svg)](https://hex.pm/packages/inspex)
-[![Hex Docs](https://img.shields.io/badge/hex-docs-lightgreen.svg)](https://hexdocs.pm/inspex)
+[![Hex.pm](https://img.shields.io/hexpm/v/gladius.svg)](https://hex.pm/packages/gladius)
+[![Hex Docs](https://img.shields.io/badge/hex-docs-lightgreen.svg)](https://hexdocs.pm/gladius)
 
 ---
 
@@ -32,19 +32,19 @@
 # mix.exs
 def deps do
   [
-    {:inspex, "~> 0.1"}
+    {:gladius, "~> 0.1"}
   ]
 end
 ```
 
-inspex runs a registry under its own supervision tree — no configuration needed; it starts automatically with your application.
+gladius runs a registry under its own supervision tree — no configuration needed; it starts automatically with your application.
 
 ---
 
 ## Quick Start
 
 ```elixir
-import Inspex
+import Gladius
 
 user = schema(%{
   required(:name)  => string(:filled?),
@@ -53,14 +53,14 @@ user = schema(%{
   optional(:role)  => atom(in?: [:admin, :user, :guest])
 })
 
-Inspex.conform(user, %{name: "Mark", email: "mark@x.com", age: 33})
+Gladius.conform(user, %{name: "Mark", email: "mark@x.com", age: 33})
 #=> {:ok, %{name: "Mark", email: "mark@x.com", age: 33}}
 
-Inspex.conform(user, %{name: "", age: 15})
+Gladius.conform(user, %{name: "", age: 15})
 #=> {:error, [
-#=>   %Inspex.Error{path: [:name],  message: "must be filled"},
-#=>   %Inspex.Error{path: [:email], message: "key :email must be present"},
-#=>   %Inspex.Error{path: [:age],   message: "must be >= 18"}
+#=>   %Gladius.Error{path: [:name],  message: "must be filled"},
+#=>   %Gladius.Error{path: [:email], message: "key :email must be present"},
+#=>   %Gladius.Error{path: [:age],   message: "must be >= 18"}
 #=> ]}
 ```
 
@@ -68,12 +68,12 @@ Inspex.conform(user, %{name: "", age: 15})
 
 | Function | Returns |
 |----------|---------|
-| `Inspex.conform(spec, value)` | `{:ok, shaped_value}` or `{:error, [Error.t()]}` |
-| `Inspex.valid?(spec, value)` | `boolean()` |
-| `Inspex.explain(spec, value)` | `ExplainResult.t()` with a formatted string |
+| `Gladius.conform(spec, value)` | `{:ok, shaped_value}` or `{:error, [Error.t()]}` |
+| `Gladius.valid?(spec, value)` | `boolean()` |
+| `Gladius.explain(spec, value)` | `ExplainResult.t()` with a formatted string |
 
 ```elixir
-result = Inspex.explain(user, %{name: "", age: 15})
+result = Gladius.explain(user, %{name: "", age: 15})
 result.valid?     #=> false
 IO.puts result.formatted
 # :name: must be filled
@@ -86,7 +86,7 @@ IO.puts result.formatted
 ## Primitives
 
 ```elixir
-import Inspex
+import Gladius
 
 string()     # any binary
 integer()    # any integer
@@ -241,7 +241,7 @@ user_schema = schema(%{
   })
 })
 
-Inspex.conform(user_schema, %{
+Gladius.conform(user_schema, %{
   name: "Mark",
   email: "mark@x.com",
   age: 33,
@@ -256,7 +256,7 @@ Inspex.conform(user_schema, %{
 ```elixir
 base = open_schema(%{required(:id) => integer(gt?: 0)})
 
-Inspex.conform(base, %{id: 1, extra: "anything"})
+Gladius.conform(base, %{id: 1, extra: "anything"})
 #=> {:ok, %{id: 1, extra: "anything"}}
 ```
 
@@ -270,7 +270,7 @@ defspec :tree_node, schema(%{
   optional(:children) => list_of(ref(:tree_node))   # circular — works fine
 })
 
-Inspex.conform(ref(:tree_node), %{
+Gladius.conform(ref(:tree_node), %{
   value: 1,
   children: [
     %{value: 2, children: []},
@@ -288,7 +288,7 @@ Inspex.conform(ref(:tree_node), %{
 
 ```elixir
 defmodule MyApp.Specs do
-  import Inspex
+  import Gladius
 
   defspec :email,    string(:filled?, format: ~r/@/)
   defspec :username, string(:filled?, min_length: 3, max_length: 32)
@@ -314,7 +314,7 @@ Generates `name/1` → `{:ok, shaped} | {:error, errors}` and `name!/1` → shap
 
 ```elixir
 defmodule MyApp.Schemas do
-  import Inspex
+  import Gladius
 
   defschema :user do
     schema(%{
@@ -338,7 +338,7 @@ MyApp.Schemas.user(%{name: "Mark", email: "m@x.com", age: 33})
 #=> {:ok, %{name: "Mark", email: "m@x.com", age: 33}}
 
 MyApp.Schemas.user!(%{name: "", age: 15})
-#=> raises Inspex.ConformError
+#=> raises Gladius.ConformError
 ```
 
 ---
@@ -388,7 +388,7 @@ Register at application startup. User coercions take **precedence over built-ins
 
 ```elixir
 # In Application.start/2 or a @on_load:
-Inspex.Coercions.register({:decimal, :float}, fn
+Gladius.Coercions.register({:decimal, :float}, fn
   %Decimal{} = d  -> {:ok, Decimal.to_float(d)}
   v when is_float(v) -> {:ok, v}
   v -> {:error, "cannot coerce #{inspect(v)} to float"}
@@ -415,7 +415,7 @@ http_params = schema(%{
   optional(:role)   => coerce(atom(in?: [:admin, :user]), from: :string)
 })
 
-Inspex.conform(http_params, %{age: "25", active: "true", score: "9.5", role: "admin"})
+Gladius.conform(http_params, %{age: "25", active: "true", score: "9.5", role: "admin"})
 #=> {:ok, %{age: 25, active: true, score: 9.5, role: :admin}}
 
 # Coercion in list_of — every element is coerced
@@ -430,7 +430,7 @@ list_of(coerce(integer(), from: :string))
 `gen/1` infers a `StreamData` generator from any spec. Available in `:dev` and `:test` — zero overhead in `:prod`.
 
 ```elixir
-import Inspex
+import Gladius
 
 gen(string(:filled?))                        # non-empty strings
 gen(integer(gte?: 0, lte?: 100))            # integers 0–100
@@ -449,7 +449,7 @@ Use with `ExUnitProperties`:
 ```elixir
 defmodule MyApp.SpecTest do
   use ExUnitProperties
-  import Inspex
+  import Gladius
 
   property "conform is idempotent for valid values" do
     spec = schema(%{
@@ -458,8 +458,8 @@ defmodule MyApp.SpecTest do
     })
 
     check all value <- gen(spec) do
-      {:ok, shaped} = Inspex.conform(spec, value)
-      assert Inspex.conform(spec, shaped) == {:ok, shaped}
+      {:ok, shaped} = Gladius.conform(spec, value)
+      assert Gladius.conform(spec, shaped) == {:ok, shaped}
     end
   end
 end
@@ -476,13 +476,13 @@ gen(even)   # generates even integers
 
 ## Function Signatures
 
-`use Inspex.Signature` enables runtime validation in `:dev` and `:test`. **Zero overhead in `:prod`** — the macro compiles the wrappers away entirely.
+`use Gladius.Signature` enables runtime validation in `:dev` and `:test`. **Zero overhead in `:prod`** — the macro compiles the wrappers away entirely.
 
 ### Basic usage
 
 ```elixir
 defmodule MyApp.Users do
-  use Inspex.Signature
+  use Gladius.Signature
 
   signature args: [string(:filled?), integer(gte?: 18)],
             ret:  boolean()
@@ -550,15 +550,15 @@ signature args: [schema(%{
 def create(params), do: true
 
 MyApp.create(%{email: "bad", name: ""})
-# raises Inspex.SignatureError:
+# raises Gladius.SignatureError:
 #   MyApp.create/1 argument error:
 #     argument[0][:email]: format must match ~r/@/
 #     argument[0][:name]: must be filled
 
 # SignatureError.errors contains:
 # [
-#   %Inspex.Error{path: [{:arg, 0}, :email], message: "format must match ~r/@/"},
-#   %Inspex.Error{path: [{:arg, 0}, :name],  message: "must be filled"}
+#   %Gladius.Error{path: [{:arg, 0}, :email], message: "format must match ~r/@/"},
+#   %Gladius.Error{path: [{:arg, 0}, :name],  message: "must be filled"}
 # ]
 ```
 
@@ -566,24 +566,24 @@ MyApp.create(%{email: "bad", name: ""})
 
 ## Typespec Bridge
 
-Converts inspex specs to quoted Elixir typespec AST. Bridges runtime validation and the compile-time type system — specs become the single source of truth for both.
+Converts gladius specs to quoted Elixir typespec AST. Bridges runtime validation and the compile-time type system — specs become the single source of truth for both.
 
 ### `to_typespec/1`
 
 ```elixir
-import Inspex
+import Gladius
 alias Macro
 
-Macro.to_string(Inspex.to_typespec(integer(gte?: 0)))            #=> "non_neg_integer()"
-Macro.to_string(Inspex.to_typespec(integer(gt?: 0)))             #=> "pos_integer()"
-Macro.to_string(Inspex.to_typespec(integer(gte?: 1, lte?: 100))) #=> "1..100"
-Macro.to_string(Inspex.to_typespec(atom(in?: [:a, :b])))         #=> ":a | :b"
-Macro.to_string(Inspex.to_typespec(maybe(string())))             #=> "String.t() | nil"
-Macro.to_string(Inspex.to_typespec(list_of(integer())))          #=> "[integer()]"
-Macro.to_string(Inspex.to_typespec(ref(:email)))                 #=> "email()"
-Macro.to_string(Inspex.to_typespec(any_of([string(), integer()]))) #=> "String.t() | integer()"
+Macro.to_string(Gladius.to_typespec(integer(gte?: 0)))            #=> "non_neg_integer()"
+Macro.to_string(Gladius.to_typespec(integer(gt?: 0)))             #=> "pos_integer()"
+Macro.to_string(Gladius.to_typespec(integer(gte?: 1, lte?: 100))) #=> "1..100"
+Macro.to_string(Gladius.to_typespec(atom(in?: [:a, :b])))         #=> ":a | :b"
+Macro.to_string(Gladius.to_typespec(maybe(string())))             #=> "String.t() | nil"
+Macro.to_string(Gladius.to_typespec(list_of(integer())))          #=> "[integer()]"
+Macro.to_string(Gladius.to_typespec(ref(:email)))                 #=> "email()"
+Macro.to_string(Gladius.to_typespec(any_of([string(), integer()]))) #=> "String.t() | integer()"
 
-Macro.to_string(Inspex.to_typespec(schema(%{
+Macro.to_string(Gladius.to_typespec(schema(%{
   required(:name) => string(),
   optional(:age)  => integer(gte?: 0)
 })))
@@ -592,7 +592,7 @@ Macro.to_string(Inspex.to_typespec(schema(%{
 
 ### Fidelity table
 
-| Inspex spec | Elixir typespec | Fidelity |
+| Gladius spec | Elixir typespec | Fidelity |
 |-------------|-----------------|----------|
 | `string()` | `String.t()` | exact |
 | `integer(gte?: 0)` | `non_neg_integer()` | exact |
@@ -616,13 +616,13 @@ Macro.to_string(Inspex.to_typespec(schema(%{
 ### `typespec_lossiness/1`
 
 ```elixir
-Inspex.typespec_lossiness(string(:filled?))
+Gladius.typespec_lossiness(string(:filled?))
 #=> [{:constraint_not_expressible, "filled?: true has no typespec equivalent"}]
 
-Inspex.typespec_lossiness(not_spec(integer()))
+Gladius.typespec_lossiness(not_spec(integer()))
 #=> [{:negation_not_expressible, "not_spec has no typespec equivalent; term() used"}]
 
-Inspex.typespec_lossiness(integer(gte?: 0, lte?: 100))
+Gladius.typespec_lossiness(integer(gte?: 0, lte?: 100))
 #=> []   # lossless
 ```
 
@@ -631,7 +631,7 @@ Inspex.typespec_lossiness(integer(gte?: 0, lte?: 100))
 `defspec` and `defschema` accept `type: true` to auto-generate a `@type` declaration. Lossy constraints emit **compile-time warnings** pointing to the call site.
 
 ```elixir
-import Inspex
+import Gladius
 
 defspec :user_id,   integer(gte?: 1),   type: true
 # @type user_id :: pos_integer()
@@ -652,10 +652,10 @@ end
 #                    optional(:role) => :admin | :user}
 ```
 
-For macro injection, `Inspex.Typespec.type_ast/2` returns the `@type` declaration AST directly:
+For macro injection, `Gladius.Typespec.type_ast/2` returns the `@type` declaration AST directly:
 
 ```elixir
-ast = Inspex.Typespec.type_ast(:my_type, integer(gte?: 0))
+ast = Gladius.Typespec.type_ast(:my_type, integer(gte?: 0))
 # Inject into a module at compile time:
 Module.eval_quoted(MyModule, ast)
 ```
@@ -666,24 +666,24 @@ Module.eval_quoted(MyModule, ast)
 
 ### Process-local registry for async tests
 
-Never use `Inspex.Registry.clear/0` in async tests — it clears the global ETS table. Use the process-local overlay instead.
+Never use `Gladius.Registry.clear/0` in async tests — it clears the global ETS table. Use the process-local overlay instead.
 
 ```elixir
 defmodule MyApp.SpecTest do
   use ExUnit.Case, async: true
-  import Inspex
+  import Gladius
 
   setup do
-    on_exit(&Inspex.Registry.clear_local/0)
+    on_exit(&Gladius.Registry.clear_local/0)
     :ok
   end
 
   test "ref resolves to a locally registered spec" do
-    Inspex.Registry.register_local(:test_email, string(:filled?, format: ~r/@/))
+    Gladius.Registry.register_local(:test_email, string(:filled?, format: ~r/@/))
     spec = schema(%{required(:email) => ref(:test_email)})
 
-    assert {:ok, _}    = Inspex.conform(spec, %{email: "a@b.com"})
-    assert {:error, _} = Inspex.conform(spec, %{email: "bad"})
+    assert {:ok, _}    = Gladius.conform(spec, %{email: "a@b.com"})
+    assert {:error, _} = Gladius.conform(spec, %{email: "bad"})
   end
 end
 ```
@@ -693,7 +693,7 @@ end
 ```elixir
 defmodule MyApp.PropertyTest do
   use ExUnitProperties
-  import Inspex
+  import Gladius
 
   property "generated values always conform" do
     spec = schema(%{
@@ -703,7 +703,7 @@ defmodule MyApp.PropertyTest do
     })
 
     check all value <- gen(spec) do
-      assert {:ok, _} = Inspex.conform(spec, value)
+      assert {:ok, _} = Gladius.conform(spec, value)
     end
   end
 
@@ -711,8 +711,8 @@ defmodule MyApp.PropertyTest do
     spec = string(:filled?)
 
     check all value <- gen(spec) do
-      {:ok, shaped} = Inspex.conform(spec, value)
-      assert Inspex.conform(spec, shaped) == {:ok, shaped}
+      {:ok, shaped} = Gladius.conform(spec, value)
+      assert Gladius.conform(spec, shaped) == {:ok, shaped}
     end
   end
 end
@@ -722,7 +722,7 @@ end
 
 ## Compared to Alternatives
 
-| | inspex | Norm | Drops | Peri |
+| | gladius | Norm | Drops | Peri |
 |-|--------|------|-------|------|
 | Parse, don't validate | ✓ | ✓ | ✓ | ✓ |
 | Named constraints | ✓ | — | ✓ | ✓ |
@@ -746,17 +746,17 @@ This section is structured for machine consumption. Complete API surface, all co
 
 | Module | Purpose |
 |--------|---------|
-| `Inspex` | Primary API — `import Inspex` |
-| `Inspex.Signature` | Function signature validation — `use Inspex.Signature` in module |
-| `Inspex.Typespec` | Spec → typespec AST conversion |
-| `Inspex.Coercions` | Coercion functions + user registry |
-| `Inspex.Registry` | Named spec registry (ETS + process-local) |
-| `Inspex.Gen` | Generator inference (dev/test only) |
-| `Inspex.Error` | Validation failure struct |
-| `Inspex.SignatureError` | Raised on signature violation |
-| `Inspex.ConformError` | Raised by `defschema name!/1` |
+| `Gladius` | Primary API — `import Gladius` |
+| `Gladius.Signature` | Function signature validation — `use Gladius.Signature` in module |
+| `Gladius.Typespec` | Spec → typespec AST conversion |
+| `Gladius.Coercions` | Coercion functions + user registry |
+| `Gladius.Registry` | Named spec registry (ETS + process-local) |
+| `Gladius.Gen` | Generator inference (dev/test only) |
+| `Gladius.Error` | Validation failure struct |
+| `Gladius.SignatureError` | Raised on signature violation |
+| `Gladius.ConformError` | Raised by `defschema name!/1` |
 
-### Complete `Inspex` function signatures
+### Complete `Gladius` function signatures
 
 ```elixir
 # Primitive builders (all accept keyword constraints)
@@ -793,17 +793,17 @@ defschema name_atom do spec_expr end
 defschema name_atom, type: true do spec_expr end
 
 # Validation
-Inspex.conform(conformable(), term()) :: {:ok, term()} | {:error, [Error.t()]}
-Inspex.valid?(conformable(), term())  :: boolean()
-Inspex.explain(conformable(), term()) :: ExplainResult.t()
+Gladius.conform(conformable(), term()) :: {:ok, term()} | {:error, [Error.t()]}
+Gladius.valid?(conformable(), term())  :: boolean()
+Gladius.explain(conformable(), term()) :: ExplainResult.t()
 
 # Generator (dev/test only — raises in prod)
-Inspex.gen(conformable()) :: StreamData.t()
+Gladius.gen(conformable()) :: StreamData.t()
 
 # Typespec
-Inspex.to_typespec(conformable())         :: Macro.t()
-Inspex.typespec_lossiness(conformable())  :: [{atom(), String.t()}]
-Inspex.Typespec.type_ast(atom, conformable()) :: Macro.t()
+Gladius.to_typespec(conformable())         :: Macro.t()
+Gladius.typespec_lossiness(conformable())  :: [{atom(), String.t()}]
+Gladius.Typespec.type_ast(atom, conformable()) :: Macro.t()
 ```
 
 ### All named constraints by type
@@ -845,10 +845,10 @@ in?: [atoms]       member of atom list
 
 All coercions are idempotent: values already of the target type pass through unchanged.
 
-### `Inspex.Error` struct
+### `Gladius.Error` struct
 
 ```elixir
-%Inspex.Error{
+%Gladius.Error{
   path:      [atom() | non_neg_integer()],
   # [] = root-level failure
   # [:email] = top-level key failure
@@ -876,18 +876,18 @@ to_string(%Error{path: [:items, 2, :name], message: "must be filled"})
 #=> ":items.[2].:name: must be filled"
 ```
 
-### `Inspex.SignatureError` struct
+### `Gladius.SignatureError` struct
 
 ```elixir
-%Inspex.SignatureError{
+%Gladius.SignatureError{
   module:   module(),
   function: atom(),
   arity:    non_neg_integer(),
   kind:     :args | :ret | :fn,
-  errors:   [Inspex.Error.t()]
+  errors:   [Gladius.Error.t()]
 }
 
-# Error path prefixes injected by Inspex.Signature:
+# Error path prefixes injected by Gladius.Signature:
 # {:arg, 0}  → "argument[0]"   for args errors
 # :ret        → "return"         for ret errors
 # :fn         → "fn"             for fn errors
@@ -903,31 +903,31 @@ to_string(%Error{path: [:items, 2, :name], message: "must be filled"})
 "MyApp.Users.register/2 argument error:\n  argument[0][:email]: must be filled\n  argument[1]: must be >= 18"
 ```
 
-### `Inspex.Registry` API
+### `Gladius.Registry` API
 
 ```elixir
 # Global ETS-backed (survives process restarts)
-Inspex.Registry.register(name :: atom, spec :: conformable()) :: :ok
-Inspex.Registry.unregister(name :: atom)                      :: :ok
-Inspex.Registry.fetch!(name :: atom)                          :: conformable()  # raises if missing
-Inspex.Registry.registered?(name :: atom)                     :: boolean()
-Inspex.Registry.all()                                         :: %{atom => conformable()}
-Inspex.Registry.clear()                                       :: :ok  # DANGER: global, avoid in async tests
+Gladius.Registry.register(name :: atom, spec :: conformable()) :: :ok
+Gladius.Registry.unregister(name :: atom)                      :: :ok
+Gladius.Registry.fetch!(name :: atom)                          :: conformable()  # raises if missing
+Gladius.Registry.registered?(name :: atom)                     :: boolean()
+Gladius.Registry.all()                                         :: %{atom => conformable()}
+Gladius.Registry.clear()                                       :: :ok  # DANGER: global, avoid in async tests
 
 # Process-local overlay (for async-safe test isolation)
-Inspex.Registry.register_local(name :: atom, spec :: conformable()) :: :ok
-Inspex.Registry.unregister_local(name :: atom)                      :: :ok
-Inspex.Registry.clear_local()                                       :: :ok  # safe in on_exit
+Gladius.Registry.register_local(name :: atom, spec :: conformable()) :: :ok
+Gladius.Registry.unregister_local(name :: atom)                      :: :ok
+Gladius.Registry.clear_local()                                       :: :ok  # safe in on_exit
 ```
 
 `fetch!/1` checks the process-local overlay first, then the global ETS table.
 
-### `Inspex.Coercions` API
+### `Gladius.Coercions` API
 
 ```elixir
-Inspex.Coercions.register({source :: atom, target :: atom}, fun :: (term -> {:ok, t} | {:error, s})) :: :ok
-Inspex.Coercions.registered() :: %{{atom, atom} => function()}
-Inspex.Coercions.lookup(source :: atom, target :: atom) :: function()
+Gladius.Coercions.register({source :: atom, target :: atom}, fun :: (term -> {:ok, t} | {:error, s})) :: :ok
+Gladius.Coercions.registered() :: %{{atom, atom} => function()}
+Gladius.Coercions.lookup(source :: atom, target :: atom) :: function()
 # Raises ArgumentError if no coercion exists (programming error, not data error)
 ```
 
@@ -945,15 +945,15 @@ Inspex.Coercions.lookup(source :: atom, target :: atom) :: function()
 
 ```
 conformable() =
-  Inspex.Spec        # primitives and coerce wrappers
-  | Inspex.All       # all_of
-  | Inspex.Any       # any_of
-  | Inspex.Not       # not_spec
-  | Inspex.Maybe     # maybe
-  | Inspex.Ref       # ref
-  | Inspex.ListOf    # list_of
-  | Inspex.Cond      # cond_spec
-  | Inspex.Schema    # schema / open_schema
+  Gladius.Spec        # primitives and coerce wrappers
+  | Gladius.All       # all_of
+  | Gladius.Any       # any_of
+  | Gladius.Not       # not_spec
+  | Gladius.Maybe     # maybe
+  | Gladius.Ref       # ref
+  | Gladius.ListOf    # list_of
+  | Gladius.Cond      # cond_spec
+  | Gladius.Schema    # schema / open_schema
 ```
 
 ### Behavioural guarantees
@@ -972,7 +972,7 @@ conformable() =
 
 7. **`signature` is prod-safe.** `Mix.env()` is checked at macro expansion time. In `:prod`, `signature/1` is a no-op and `def` delegates directly to `Kernel.def`. Never guard signature calls with `Mix.env()` yourself.
 
-8. **Coercion registry is global and permanent.** `Inspex.Coercions.register/2` uses `:persistent_term`. There is no `unregister`. Call once at startup; never in tests or hot paths.
+8. **Coercion registry is global and permanent.** `Gladius.Coercions.register/2` uses `:persistent_term`. There is no `unregister`. Call once at startup; never in tests or hot paths.
 
 9. **Process-local registry for test isolation.** Use `register_local/2` + `clear_local/0` in `on_exit`. `clear/0` clears the global ETS table — safe only in synchronous (non-async) test setup.
 

@@ -2,7 +2,7 @@
   inputs: ["{mix,.formatter}.exs", "{config,lib,test}/**/*.{ex,exs}"],
   line_length: 98,
   locals_without_parens: [
-    # Inspex spec builders — allow parens-free call style in schemas
+    # Gladius spec builders — allow parens-free call style in schemas
     string: 0,
     string: 1,
     string: 2,

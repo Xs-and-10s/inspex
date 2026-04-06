@@ -1,4 +1,4 @@
-defmodule Inspex.UndefinedSpecError do
+defmodule Gladius.UndefinedSpecError do
   @moduledoc "Raised when `ref/1` resolves against an unregistered spec name."
   defexception [:name]
 
@@ -9,17 +9,17 @@ defmodule Inspex.UndefinedSpecError do
 
     For global registration (production use):
 
-        import Inspex
-        Inspex.def(#{inspect(name)}, your_spec_here)
+        import Gladius
+        Gladius.def(#{inspect(name)}, your_spec_here)
 
     For process-local registration (test use, async-safe):
 
-        Inspex.Registry.register_local(#{inspect(name)}, your_spec_here)
+        Gladius.Registry.register_local(#{inspect(name)}, your_spec_here)
     """
   end
 end
 
-defmodule Inspex.Registry do
+defmodule Gladius.Registry do
   @moduledoc """
   Named spec registry — ETS-backed GenServer with a process-dictionary overlay.
 
@@ -32,7 +32,7 @@ defmodule Inspex.Registry do
 
   ## Two registration paths
 
-  **Global (ETS)** — `register/2` or the `Inspex.def/2` macro.
+  **Global (ETS)** — `register/2` or the `Gladius.def/2` macro.
   Writes go through the GenServer (serialised), reads bypass it (concurrent).
   Visible to all processes. Use for application-level specs.
 
@@ -44,8 +44,8 @@ defmodule Inspex.Registry do
 
       # In async: true tests — use local registration
       setup do
-        Inspex.Registry.register_local(:email, Inspex.string(format: ~r/@/))
-        on_exit(&Inspex.Registry.clear_local/0)
+        Gladius.Registry.register_local(:email, Gladius.string(format: ~r/@/))
+        on_exit(&Gladius.Registry.clear_local/0)
       end
 
       # For tests that exercise global registration specifically — use async: false
@@ -59,8 +59,8 @@ defmodule Inspex.Registry do
 
   use GenServer
 
-  @table :inspex_registry
-  @pdict_prefix :__inspex_local__
+  @table :gladius_registry
+  @pdict_prefix :__gladius_local__
 
   # ---------------------------------------------------------------------------
   # Client API — reads (bypass GenServer, hit ETS directly)
@@ -70,7 +70,7 @@ defmodule Inspex.Registry do
   Returns the spec registered under `name`.
 
   Checks the process dictionary first (local override), then the global ETS
-  table. Raises `Inspex.UndefinedSpecError` if not found in either.
+  table. Raises `Gladius.UndefinedSpecError` if not found in either.
   """
   @spec fetch!(atom()) :: term()
   def fetch!(name) when is_atom(name) do
@@ -131,8 +131,8 @@ defmodule Inspex.Registry do
   the process exits. **Preferred for tests** — keeps `async: true` safe.
 
       setup do
-        Inspex.Registry.register_local(:role, Inspex.atom(in?: [:admin]))
-        on_exit(&Inspex.Registry.clear_local/0)
+        Gladius.Registry.register_local(:role, Gladius.atom(in?: [:admin]))
+        on_exit(&Gladius.Registry.clear_local/0)
       end
   """
   @spec register_local(atom(), term()) :: :ok
@@ -198,7 +198,7 @@ defmodule Inspex.Registry do
   defp fetch_global!(name) do
     case :ets.lookup(@table, name) do
       [{^name, spec}] -> spec
-      []              -> raise Inspex.UndefinedSpecError, name: name
+      []              -> raise Gladius.UndefinedSpecError, name: name
     end
   end
 end

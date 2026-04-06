@@ -1,6 +1,6 @@
-defmodule Inspex do
+defmodule Gladius do
   @moduledoc """
-  `inspex` — a Clojure spec-inspired validation & parsing library for Elixir.
+  `gladius` — a Clojure spec-inspired validation & parsing library for Elixir.
 
   ## Design
 
@@ -16,7 +16,7 @@ defmodule Inspex do
 
   ## Quick start
 
-      import Inspex
+      import Gladius
 
       user = schema(%{
         required(:name)  => string(:filled?),
@@ -25,25 +25,25 @@ defmodule Inspex do
         optional(:role)  => atom(in?: [:admin, :user, :guest])
       })
 
-      Inspex.conform(user, %{name: "Mark", email: "mark@x.com", age: 33})
+      Gladius.conform(user, %{name: "Mark", email: "mark@x.com", age: 33})
       #=> {:ok, %{name: "Mark", email: "mark@x.com", age: 33}}
 
-      Inspex.conform(user, %{name: "", age: 15})
+      Gladius.conform(user, %{name: "", age: 15})
       #=> {:error, [
-      #=>   %Inspex.Error{path: [:name],  message: "must be filled"},
-      #=>   %Inspex.Error{path: [:email], message: "key :email must be present"},
-      #=>   %Inspex.Error{path: [:age],   message: "must be >= 18"}
+      #=>   %Gladius.Error{path: [:name],  message: "must be filled"},
+      #=>   %Gladius.Error{path: [:email], message: "key :email must be present"},
+      #=>   %Gladius.Error{path: [:age],   message: "must be >= 18"}
       #=> ]}
 
-      Inspex.explain(user, %{name: "", age: 15})
-      #=> %Inspex.ExplainResult{
+      Gladius.explain(user, %{name: "", age: 15})
+      #=> %Gladius.ExplainResult{
       #=>   valid?: false,
       #=>   formatted: ":name: must be filled\\n:email: key :email must be present\\n:age: must be >= 18"
       #=>   ...
       #=> }
   """
 
-  alias Inspex.{
+  alias Gladius.{
     Spec, All, Any, Not, Maybe, Ref, ListOf, Cond, Schema, SchemaKey,
     Error, ExplainResult, Constraints
   }
@@ -98,7 +98,7 @@ defmodule Inspex do
       even = spec(fn x -> rem(x, 2) == 0 end,
                   gen: StreamData.filter(StreamData.integer(), &(rem(&1, 2) == 0)))
 
-      Inspex.gen(even)   # uses the explicit generator
+      Gladius.gen(even)   # uses the explicit generator
 
   ## Prefer typed builders when possible
 
@@ -108,7 +108,7 @@ defmodule Inspex do
   """
   defmacro spec(expr, opts \\ []) do
     source  = Macro.to_string(expr)
-    v       = Macro.var(:__inspex_v__, __MODULE__)
+    v       = Macro.var(:__gladius_v__, __MODULE__)
     bool_body = to_bool_expr(expr, v)
     # opts[:gen] is nil when absent, or the AST of the StreamData generator
     # expression. unquote(nil) stores nil; unquote(gen_ast) splices the
@@ -116,7 +116,7 @@ defmodule Inspex do
     gen_ast = opts[:gen]
 
     quote do
-      %Inspex.Spec{
+      %Gladius.Spec{
         predicate: fn unquote(v) -> unquote(bool_body) end,
         generator: unquote(gen_ast),
         meta: %{source: unquote(source)}
@@ -125,16 +125,16 @@ defmodule Inspex do
   end
 
   # ===========================================================================
-  # Inspex.def/2 — global spec registration (Clojure s/def equivalent)
+  # Gladius.def/2 — global spec registration (Clojure s/def equivalent)
   # ===========================================================================
 
   @doc """
-  Registers a spec globally under `name` in the `Inspex.Registry`.
+  Registers a spec globally under `name` in the `Gladius.Registry`.
 
   The Clojure spec equivalent of `s/def`. Specs registered this way are
   accessible from any process via `ref/1`.
 
-      import Inspex
+      import Gladius
 
       defspec :email,  string(:filled?, format: ~r/@/)
       defspec :age,    integer(gte?: 0, lte?: 150)
@@ -156,7 +156,7 @@ defmodule Inspex do
   defmacro defspec(name, spec, opts \\ []) when is_atom(name) do
     type_code = defspec_type_code(name, spec, opts, __CALLER__)
     quote do
-      Inspex.Registry.register(unquote(name), unquote(spec))
+      Gladius.Registry.register(unquote(name), unquote(spec))
       unquote(type_code)
     end
   end
@@ -164,7 +164,7 @@ defmodule Inspex do
   # Builds the @type declaration AST when `type: true` is passed.
   #
   # Uses Code.eval_quoted to run the spec expression in the caller's
-  # environment — __CALLER__ carries import Inspex so spec builders resolve.
+  # environment — __CALLER__ carries import Gladius so spec builders resolve.
   # Emits IO.warn (a compile-time warning pointing at the defspec call site)
   # for each lossiness notice. Falls back to a no-op if the spec expression
   # can't be evaluated at compile time (e.g. it references a runtime variable).
@@ -173,11 +173,11 @@ defmodule Inspex do
       try do
         {spec_struct, _bindings} = Code.eval_quoted(spec_ast, [], caller)
 
-        for {_reason, msg} <- Inspex.Typespec.lossiness(spec_struct) do
+        for {_reason, msg} <- Gladius.Typespec.lossiness(spec_struct) do
           IO.warn("defspec #{inspect(name)} type: #{msg}", caller)
         end
 
-        Inspex.Typespec.type_ast(name, spec_struct)
+        Gladius.Typespec.type_ast(name, spec_struct)
       rescue
         err ->
           IO.warn(
@@ -203,7 +203,7 @@ defmodule Inspex do
   ## Usage
 
       defmodule MyApp.Schemas do
-        import Inspex
+        import Gladius
 
         defschema :user do
           schema(%{
@@ -219,24 +219,24 @@ defmodule Inspex do
       #=> {:ok, %{name: "Mark", email: "m@x.com", age: 33}}
 
       MyApp.Schemas.user!(%{name: "", age: 15})
-      #=> raises Inspex.ConformError
+      #=> raises Gladius.ConformError
 
   ## Generated functions
 
-  - `name/1`  — returns `{:ok, shaped_value}` or `{:error, [%Inspex.Error{}]}`
-  - `name!/1` — returns `shaped_value` or raises `Inspex.ConformError`
+  - `name/1`  — returns `{:ok, shaped_value}` or `{:error, [%Gladius.Error{}]}`
+  - `name!/1` — returns `shaped_value` or raises `Gladius.ConformError`
 
   ## Registering a defschema globally
 
-  `defschema` does not automatically register the schema in the `Inspex.Registry`.
-  If you want to reference it via `ref/1`, call `Inspex.def/2` separately:
+  `defschema` does not automatically register the schema in the `Gladius.Registry`.
+  If you want to reference it via `ref/1`, call `Gladius.def/2` separately:
 
       defschema :address do
         schema(%{required(:street) => string(:filled?), required(:zip) => string(size?: 5)})
       end
 
       # Now ref(:address) works from other schemas
-      Inspex.def(:address, address(%{}))   # ← call your own function to get the schema struct
+      Gladius.def(:address, address(%{}))   # ← call your own function to get the schema struct
 
   A cleaner approach: define the schema expression once as a module function:
 
@@ -245,7 +245,7 @@ defmodule Inspex do
       end
 
       defschema :address, do: address_schema()
-      # Then: Inspex.def(:address, address_schema())
+      # Then: Gladius.def(:address, address_schema())
   """
   # Accepts two call forms:
   #   defschema :user do ... end
@@ -268,14 +268,14 @@ defmodule Inspex do
     quote do
       @doc "Validates `data` against the `#{unquote(name)}` schema. Returns `{:ok, value}` or `{:error, errors}`."
       def unquote(name)(data) do
-        Inspex.conform(unquote(schema_expr), data)
+        Gladius.conform(unquote(schema_expr), data)
       end
 
-      @doc "Like `#{unquote(name)}/1` but returns the shaped value or raises `Inspex.ConformError`."
+      @doc "Like `#{unquote(name)}/1` but returns the shaped value or raises `Gladius.ConformError`."
       def unquote(bang)(data) do
         case unquote(name)(data) do
           {:ok, value}     -> value
-          {:error, errors} -> raise Inspex.ConformError, name: unquote(name), errors: errors
+          {:error, errors} -> raise Gladius.ConformError, name: unquote(name), errors: errors
         end
       end
 
@@ -288,11 +288,11 @@ defmodule Inspex do
       try do
         {schema_struct, _} = Code.eval_quoted(schema_ast, [], caller)
 
-        for {_reason, msg} <- Inspex.Typespec.lossiness(schema_struct) do
+        for {_reason, msg} <- Gladius.Typespec.lossiness(schema_struct) do
           IO.warn("defschema #{inspect(name)} type: #{msg}", caller)
         end
 
-        Inspex.Typespec.type_ast(name, schema_struct)
+        Gladius.Typespec.type_ast(name, schema_struct)
       rescue
         err ->
           IO.warn(
@@ -466,7 +466,7 @@ defmodule Inspex do
   def maybe(inner_spec), do: %Maybe{spec: inner_spec}
 
   @doc """
-  Lazy reference to a named spec in `Inspex.Registry`.
+  Lazy reference to a named spec in `Gladius.Registry`.
   Resolved at conform-time — enables circular schemas.
   """
   @spec ref(atom()) :: Ref.t()
@@ -515,7 +515,7 @@ defmodule Inspex do
   ## Coercion runs before validation
 
   The pipeline is: `raw → coerce → type_check → constraints → {:ok, coerced}`.
-  If coercion fails, an `%Inspex.Error{predicate: :coerce}` is returned and
+  If coercion fails, an `%Gladius.Error{predicate: :coerce}` is returned and
   downstream checks are skipped.
 
   ## Idempotency
@@ -536,7 +536,7 @@ defmodule Inspex do
 
   def coerce(%Spec{type: target_type} = spec, from: source_type)
       when is_atom(source_type) do
-    coerce_fn = Inspex.Coercions.lookup(source_type, target_type)
+    coerce_fn = Gladius.Coercions.lookup(source_type, target_type)
     %{spec | coercion: coerce_fn}
   end
 
@@ -604,7 +604,7 @@ defmodule Inspex do
   ## Usage
 
       use ExUnitProperties
-      import Inspex, except: [integer: 0, integer: 1, integer: 2,
+      import Gladius, except: [integer: 0, integer: 1, integer: 2,
                                float: 0, float: 1, float: 2,
                                string: 0, string: 1, string: 2,
                                boolean: 0, atom: 0, atom: 1,
@@ -616,8 +616,8 @@ defmodule Inspex do
           required(:age)  => integer(gte?: 18, lte?: 120),
           optional(:role) => atom(in?: [:admin, :user])
         })
-        check all value <- Inspex.gen(user) do
-          assert Inspex.valid?(user, value)
+        check all value <- Gladius.gen(user) do
+          assert Gladius.valid?(user, value)
         end
       end
 
@@ -628,20 +628,20 @@ defmodule Inspex do
       even_int = spec(fn x -> is_integer(x) and rem(x, 2) == 0 end,
                       gen: StreamData.filter(StreamData.integer(), &(rem(&1, 2) == 0)))
 
-      Inspex.gen(even_int)  # uses the explicit generator, no error
+      Gladius.gen(even_int)  # uses the explicit generator, no error
 
-  See `Inspex.Gen` for the full inference rule table.
+  See `Gladius.Gen` for the full inference rule table.
 
   > #### Availability {: .info}
   > `gen/1` requires `stream_data` to be available. Add it to your deps
   > with `only: [:dev, :test]` since it is a development and testing aid,
   > not a production concern.
   """
-  defdelegate gen(spec), to: Inspex.Gen
+  defdelegate gen(spec), to: Gladius.Gen
 
   @doc """
   Validates `value` against `spec`. Returns `{:ok, shaped_value}` on success,
-  or `{:error, [%Inspex.Error{}]}` with every failure — no short-circuiting.
+  or `{:error, [%Gladius.Error{}]}` with every failure — no short-circuiting.
 
   The shaped value may differ from the raw input when specs include coercions
   (`coerce/2`). The coerced value is what downstream constraints and the
@@ -649,18 +649,18 @@ defmodule Inspex do
 
   ## Examples
 
-      iex> import Inspex
+      iex> import Gladius
       iex> conform(string(:filled?), "hello")
       {:ok, "hello"}
 
       iex> conform(string(:filled?), "")
-      {:error, [%Inspex.Error{predicate: :filled?, message: "must be filled"}]}
+      {:error, [%Gladius.Error{predicate: :filled?, message: "must be filled"}]}
 
       iex> conform(coerce(integer(), from: :string), "42")
       {:ok, 42}
 
       iex> conform(schema(%{required(:age) => integer(gte?: 18)}), %{age: 15})
-      {:error, [%Inspex.Error{path: [:age], message: "must be >= 18"}]}
+      {:error, [%Gladius.Error{path: [:age], message: "must be >= 18"}]}
   """
   @spec conform(conformable(), term()) :: conform_result()
 
@@ -787,10 +787,10 @@ defmodule Inspex do
   # --- Ref (lazy registry resolution) ----------------------------------------
 
   def conform(%Ref{name: name}, value) do
-    spec = Inspex.Registry.fetch!(name)
+    spec = Gladius.Registry.fetch!(name)
     conform(spec, value)
   rescue
-    e in Inspex.UndefinedSpecError ->
+    e in Gladius.UndefinedSpecError ->
       {:error, [%Error{value: value, message: Exception.message(e)}]}
   end
 
@@ -922,7 +922,7 @@ defmodule Inspex do
 
   ## Examples
 
-      iex> import Inspex
+      iex> import Gladius
       iex> valid?(integer(gte?: 0), 42)
       true
       iex> valid?(integer(gte?: 0), -1)
@@ -932,7 +932,7 @@ defmodule Inspex do
   def valid?(spec, value), do: match?({:ok, _}, conform(spec, value))
 
   @doc """
-  Returns a `%Inspex.ExplainResult{}` with structured errors and a
+  Returns a `%Gladius.ExplainResult{}` with structured errors and a
   pre-formatted string ready for display or logging.
 
   For the raw `{:ok, val} | {:error, errors}` result, use `conform/2`.
@@ -940,7 +940,7 @@ defmodule Inspex do
 
   ## Example
 
-      iex> import Inspex
+      iex> import Gladius
       iex> result = explain(schema(%{required(:age) => integer(gte?: 18)}), %{age: 15})
       iex> result.valid?
       false
@@ -997,23 +997,23 @@ defmodule Inspex do
   # ===========================================================================
 
   @doc """
-  Converts an inspex spec to quoted Elixir typespec AST.
+  Converts an gladius spec to quoted Elixir typespec AST.
 
   Returns a valid `Macro.t()` in all cases. Constructs with no typespec
   equivalent fall back to `term()` or their base type. Use
   `typespec_lossiness/1` to see what was elided.
 
-      iex> import Inspex
-      iex> Macro.to_string(Inspex.to_typespec(integer(gte?: 0)))
+      iex> import Gladius
+      iex> Macro.to_string(Gladius.to_typespec(integer(gte?: 0)))
       "non_neg_integer()"
   """
-  defdelegate to_typespec(spec), to: Inspex.Typespec
+  defdelegate to_typespec(spec), to: Gladius.Typespec
 
   @doc """
   Returns lossiness notices for a spec — `[{reason, description}]`.
-  Empty list means lossless. See `Inspex.Typespec` for full docs.
+  Empty list means lossless. See `Gladius.Typespec` for full docs.
   """
-  defdelegate typespec_lossiness(spec), to: Inspex.Typespec, as: :lossiness
+  defdelegate typespec_lossiness(spec), to: Gladius.Typespec, as: :lossiness
 
   defp prepend_path(errors, key) do
     Enum.map(errors, fn err -> %{err | path: [key | err.path]} end)

@@ -1,7 +1,7 @@
-defmodule Inspex.CoercionTest do
+defmodule Gladius.CoercionTest do
   use ExUnit.Case, async: true
 
-  import Inspex
+  import Gladius
 
   # ===========================================================================
   # coerce/2 with custom functions

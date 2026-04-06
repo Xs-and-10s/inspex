@@ -1,7 +1,7 @@
-defmodule InspexTest do
+defmodule GladiusTest do
   use ExUnit.Case, async: true
 
-  import Inspex
+  import Gladius
 
   # ===========================================================================
   # Primitive type specs
@@ -163,7 +163,7 @@ defmodule InspexTest do
       assert {:error, _} = conform(positive_even_int, 2.0)  # float
     end
 
-    test "triple composition via all_of is the idiomatic inspex approach" do
+    test "triple composition via all_of is the idiomatic gladius approach" do
       positive_even_int =
         all_of([spec(is_integer()), spec(&(&1 > 0)), spec(&(rem(&1, 2) == 0))])
 
@@ -466,24 +466,24 @@ defmodule InspexTest do
   # Error string representation
   # ===========================================================================
 
-  describe "Inspex.Error — String.Chars" do
+  describe "Gladius.Error — String.Chars" do
     test "root-level error (empty path)" do
-      err = %Inspex.Error{path: [], message: "must be a map"}
+      err = %Gladius.Error{path: [], message: "must be a map"}
       assert to_string(err) == "must be a map"
     end
 
     test "single-key path" do
-      err = %Inspex.Error{path: [:name], message: "must be filled"}
+      err = %Gladius.Error{path: [:name], message: "must be filled"}
       assert to_string(err) == ":name: must be filled"
     end
 
     test "nested key path" do
-      err = %Inspex.Error{path: [:user, :address, :zip], message: "must be 5 chars"}
+      err = %Gladius.Error{path: [:user, :address, :zip], message: "must be 5 chars"}
       assert to_string(err) == ":user.:address.:zip: must be 5 chars"
     end
 
     test "path with list index" do
-      err = %Inspex.Error{path: [:tags, 2], message: "must be filled"}
+      err = %Gladius.Error{path: [:tags, 2], message: "must be filled"}
       assert to_string(err) == ":tags.[2]: must be filled"
     end
   end
@@ -494,12 +494,12 @@ defmodule InspexTest do
 
   describe "ref/1 — registry" do
     setup do
-      on_exit(fn -> Inspex.Registry.clear() end)
+      on_exit(fn -> Gladius.Registry.clear() end)
       :ok
     end
 
     test "resolves a registered spec" do
-      Inspex.Registry.register(:pos_int, integer(gt?: 0))
+      Gladius.Registry.register(:pos_int, integer(gt?: 0))
       assert {:ok, 5}  = conform(ref(:pos_int), 5)
       assert {:error, _} = conform(ref(:pos_int), -1)
       assert {:error, _} = conform(ref(:pos_int), "5")
@@ -511,7 +511,7 @@ defmodule InspexTest do
     end
 
     test "ref inside a schema" do
-      Inspex.Registry.register(:email, string(:filled?, format: ~r/@/))
+      Gladius.Registry.register(:email, string(:filled?, format: ~r/@/))
 
       user = schema(%{
         required(:name)  => string(:filled?),
@@ -524,8 +524,8 @@ defmodule InspexTest do
     end
 
     test "registration overwrites previous value" do
-      Inspex.Registry.register(:x, integer())
-      Inspex.Registry.register(:x, string())
+      Gladius.Registry.register(:x, integer())
+      Gladius.Registry.register(:x, string())
       assert {:ok, "hi"} = conform(ref(:x), "hi")
       assert {:error, _} = conform(ref(:x), 42)
     end

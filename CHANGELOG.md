@@ -1,9 +1,9 @@
 # Changelog
 
-All notable changes to inspex are documented here.
+All notable changes to Gladius are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
-inspex adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Gladius adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
@@ -44,7 +44,7 @@ First public release.
 - **Built-in pairs** — 11 source→target coercions: string→integer/float/
   boolean/atom/number, integer→float/string/boolean, atom→string,
   float→integer/string
-- **User-extensible registry** — `Inspex.Coercions.register/2` backed by
+- **User-extensible registry** — `Gladius.Coercions.register/2` backed by
   `:persistent_term`; user coercions take precedence over built-ins
 
 ### Generator inference
@@ -57,7 +57,7 @@ First public release.
 
 ### Function signature checking
 
-- `use Inspex.Signature` — opt-in per module
+- `use Gladius.Signature` — opt-in per module
 - `signature args: [...], ret: ..., fn: ...` — declares arg specs, return
   spec, and optional relationship constraint
 - Validates and coerces all args before the impl runs; coerced values are
@@ -70,7 +70,7 @@ First public release.
 
 ### Typespec bridge
 
-- `to_typespec/1` — converts any inspex spec to quoted Elixir typespec AST
+- `to_typespec/1` — converts any Gladius spec to quoted Elixir typespec AST
 - `typespec_lossiness/1` — reports constraints that have no typespec
   equivalent (string format, negation, intersection, etc.)
 - `type_ast/2` — generates `@type name :: type` declaration AST for macro
@@ -83,4 +83,4 @@ First public release.
 
 ---
 
-[0.1.0]: https://github.com/Xs-and-10s/inspex/releases/tag/v0.1.0
+[0.1.0]: https://github.com/Xs-and-10s/gladius/releases/tag/v0.1.0

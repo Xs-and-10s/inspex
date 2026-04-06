@@ -1,4 +1,4 @@
-defmodule Inspex.Spec do
+defmodule Gladius.Spec do
   @moduledoc """
   The leaf node of the spec algebra — a primitive spec.
 
@@ -52,7 +52,7 @@ end
 
 # ---------------------------------------------------------------------------
 
-defmodule Inspex.All do
+defmodule Gladius.All do
   @moduledoc """
   AND composition — **all** specs must conform (set-theoretic intersection).
 
@@ -66,13 +66,13 @@ defmodule Inspex.All do
       # positive even integer
   """
 
-  @type t :: %__MODULE__{specs: [Inspex.conformable()]}
+  @type t :: %__MODULE__{specs: [Gladius.conformable()]}
   defstruct [:specs]
 end
 
 # ---------------------------------------------------------------------------
 
-defmodule Inspex.Any do
+defmodule Gladius.Any do
   @moduledoc """
   OR composition — **at least one** spec must conform (set-theoretic union).
 
@@ -85,13 +85,13 @@ defmodule Inspex.Any do
       # accepts integers or strings
   """
 
-  @type t :: %__MODULE__{specs: [Inspex.conformable()]}
+  @type t :: %__MODULE__{specs: [Gladius.conformable()]}
   defstruct [:specs]
 end
 
 # ---------------------------------------------------------------------------
 
-defmodule Inspex.Not do
+defmodule Gladius.Not do
   @moduledoc """
   Negation — the inner spec must **not** conform (set-theoretic complement).
 
@@ -104,13 +104,13 @@ defmodule Inspex.Not do
       # a string that is NOT filled — i.e., an empty string
   """
 
-  @type t :: %__MODULE__{spec: Inspex.conformable()}
+  @type t :: %__MODULE__{spec: Gladius.conformable()}
   defstruct [:spec]
 end
 
 # ---------------------------------------------------------------------------
 
-defmodule Inspex.Maybe do
+defmodule Gladius.Maybe do
   @moduledoc """
   Nullable wrapper — `nil` passes unconditionally; any other value is
   delegated to the inner spec.
@@ -124,15 +124,15 @@ defmodule Inspex.Maybe do
       # nil is ok; non-nil must be a non-empty string
   """
 
-  @type t :: %__MODULE__{spec: Inspex.conformable()}
+  @type t :: %__MODULE__{spec: Gladius.conformable()}
   defstruct [:spec]
 end
 
 # ---------------------------------------------------------------------------
 
-defmodule Inspex.Ref do
+defmodule Gladius.Ref do
   @moduledoc """
-  A lazy reference to a named spec in the `Inspex.Registry`.
+  A lazy reference to a named spec in the `Gladius.Registry`.
 
   Resolved at **conform-time**, not build-time. This is what enables circular
   schemas (e.g., a tree node whose children are also tree nodes) — you can
@@ -140,7 +140,7 @@ defmodule Inspex.Ref do
 
   ## Example
 
-      Inspex.def(:email, string(:filled?, format: ~r/@/))
+      Gladius.def(:email, string(:filled?, format: ~r/@/))
 
       schema(%{
         required(:user_email) => ref(:email)
@@ -153,7 +153,7 @@ end
 
 # ---------------------------------------------------------------------------
 
-defmodule Inspex.ListOf do
+defmodule Gladius.ListOf do
   @moduledoc """
   A homogeneous typed list — every element must conform to `element_spec`.
 
@@ -169,13 +169,13 @@ defmodule Inspex.ListOf do
       # ["a", "",  "c"] -> error at path [1]: must be filled
   """
 
-  @type t :: %__MODULE__{element_spec: Inspex.conformable()}
+  @type t :: %__MODULE__{element_spec: Gladius.conformable()}
   defstruct [:element_spec]
 end
 
 # ---------------------------------------------------------------------------
 
-defmodule Inspex.Cond do
+defmodule Gladius.Cond do
   @moduledoc """
   Conditional branching — applies `if_spec` or `else_spec` based on a
   predicate function applied to the **whole value** at the current conform
@@ -184,7 +184,7 @@ defmodule Inspex.Cond do
   This is distinct from `any_of`: `Cond` makes a decision, then conforms
   exactly one branch. `Any` tries branches until one succeeds.
 
-  `else_spec` defaults to `%Inspex.Spec{type: :any}` — a passthrough — if
+  `else_spec` defaults to `%Gladius.Spec{type: :any}` — a passthrough — if
   not supplied.
 
   ## Example
@@ -203,8 +203,8 @@ defmodule Inspex.Cond do
 
   @type t :: %__MODULE__{
           predicate_fn: (term() -> boolean()),
-          if_spec: Inspex.conformable(),
-          else_spec: Inspex.conformable()
+          if_spec: Gladius.conformable(),
+          else_spec: Gladius.conformable()
         }
 
   defstruct [:predicate_fn, :if_spec, :else_spec]
@@ -212,9 +212,9 @@ end
 
 # ---------------------------------------------------------------------------
 
-defmodule Inspex.SchemaKey do
+defmodule Gladius.SchemaKey do
   @moduledoc """
-  Metadata for a single key in an `Inspex.Schema`.
+  Metadata for a single key in an `Gladius.Schema`.
 
   Not constructed directly — use `required/1` and `optional/1` as map keys
   inside `schema/1` or `open_schema/1`.
@@ -223,7 +223,7 @@ defmodule Inspex.SchemaKey do
   @type t :: %__MODULE__{
           name: atom(),
           required: boolean(),
-          spec: Inspex.conformable()
+          spec: Gladius.conformable()
         }
 
   defstruct [:name, :spec, required: true]
@@ -231,7 +231,7 @@ end
 
 # ---------------------------------------------------------------------------
 
-defmodule Inspex.Schema do
+defmodule Gladius.Schema do
   @moduledoc """
   A map spec — validates the shape, required keys, and typed values of a map.
 
@@ -249,7 +249,7 @@ defmodule Inspex.Schema do
   """
 
   @type t :: %__MODULE__{
-          keys: [Inspex.SchemaKey.t()],
+          keys: [Gladius.SchemaKey.t()],
           open?: boolean()
         }
 

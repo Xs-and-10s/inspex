@@ -1,4 +1,4 @@
-defmodule Inspex.Error do
+defmodule Gladius.Error do
   @moduledoc """
   A single validation failure, with a dot-traversable path to the offending
   value.
@@ -19,10 +19,10 @@ defmodule Inspex.Error do
 
   Implements `String.Chars` so `to_string/1` and string interpolation work:
 
-      iex> to_string(%Inspex.Error{path: [:user, :age], message: "must be >= 18"})
+      iex> to_string(%Gladius.Error{path: [:user, :age], message: "must be >= 18"})
       ":user.:age: must be >= 18"
 
-      iex> to_string(%Inspex.Error{path: [], message: "must be a map"})
+      iex> to_string(%Gladius.Error{path: [], message: "must be a map"})
       "must be a map"
   """
 
@@ -43,9 +43,9 @@ defmodule Inspex.Error do
   ]
 
   defimpl String.Chars do
-    def to_string(%Inspex.Error{path: [], message: msg}), do: msg
+    def to_string(%Gladius.Error{path: [], message: msg}), do: msg
 
-    def to_string(%Inspex.Error{path: path, message: msg}) do
+    def to_string(%Gladius.Error{path: path, message: msg}) do
       formatted =
         path
         |> Enum.map(fn
@@ -62,22 +62,22 @@ end
 
 # ---------------------------------------------------------------------------
 
-defmodule Inspex.ExplainResult do
+defmodule Gladius.ExplainResult do
   @moduledoc """
-  The structured result of `Inspex.explain/2`.
+  The structured result of `Gladius.explain/2`.
 
   ## Fields
 
   - `:valid?` — `true` if the value conformed to the spec.
   - `:value` — the (possibly shaped/coerced) value on success, the original
     value on failure.
-  - `:errors` — list of `Inspex.Error.t()`. Empty on success.
+  - `:errors` — list of `Gladius.Error.t()`. Empty on success.
   - `:formatted` — a pre-rendered newline-delimited string of all error
     messages, ready to display. `"ok"` on success.
 
   ## Usage
 
-      iex> result = Inspex.explain(schema, bad_data)
+      iex> result = Gladius.explain(schema, bad_data)
       iex> result.valid?
       false
       iex> IO.puts(result.formatted)
@@ -89,7 +89,7 @@ defmodule Inspex.ExplainResult do
   @type t :: %__MODULE__{
           valid?: boolean(),
           value: term(),
-          errors: [Inspex.Error.t()],
+          errors: [Gladius.Error.t()],
           formatted: String.t()
         }
 

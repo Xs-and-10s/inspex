@@ -1,12 +1,12 @@
-defmodule Inspex.MixProject do
+defmodule Gladius.MixProject do
   use Mix.Project
 
   @version "0.1.0"
-  @source_url "https://github.com/Xs-and-10s/inspex"
+  @source_url "https://github.com/Xs-and-10s/gladius"
 
   def project do
     [
-      app:               :inspex,
+      app:               :gladius,
       version:           @version,
       elixir:            "~> 1.17",
       start_permanent:   Mix.env() == :prod,
@@ -14,7 +14,7 @@ defmodule Inspex.MixProject do
       description:       description(),
       package:           package(),
       docs:              docs(),
-      name:              "Inspex",
+      name:              "Gladius",
       source_url:        @source_url,
       homepage_url:      @source_url,
       aliases:           aliases()
@@ -23,7 +23,7 @@ defmodule Inspex.MixProject do
 
   def application do
     [
-      mod:                {Inspex.Application, []},
+      mod:                {Gladius.Application, []},
       extra_applications: [:logger]
     ]
   end
@@ -39,7 +39,7 @@ defmodule Inspex.MixProject do
 
   defp package do
     [
-      name:        "inspex",
+      name:        "gladius",
       licenses:    ["MIT"],
       links:       %{
         "GitHub"    => @source_url,
@@ -56,16 +56,16 @@ defmodule Inspex.MixProject do
       source_url:      @source_url,
       extras:          ["README.md", "CHANGELOG.md"],
       groups_for_modules: [
-        "Core":       [Inspex],
-        "Types":      [Inspex.Spec, Inspex.All, Inspex.Any, Inspex.Not,
-                       Inspex.Maybe, Inspex.Ref, Inspex.ListOf, Inspex.Cond,
-                       Inspex.Schema, Inspex.SchemaKey],
-        "Errors":     [Inspex.Error, Inspex.ExplainResult,
-                       Inspex.ConformError, Inspex.SignatureError],
-        "Signature":  [Inspex.Signature],
-        "Typespec":   [Inspex.Typespec],
-        "Internals":  [Inspex.Registry, Inspex.Coercions,
-                       Inspex.Constraints, Inspex.Gen]
+        "Core":       [Gladius],
+        "Types":      [Gladius.Spec, Gladius.All, Gladius.Any, Gladius.Not,
+                       Gladius.Maybe, Gladius.Ref, Gladius.ListOf, Gladius.Cond,
+                       Gladius.Schema, Gladius.SchemaKey],
+        "Errors":     [Gladius.Error, Gladius.ExplainResult,
+                       Gladius.ConformError, Gladius.SignatureError],
+        "Signature":  [Gladius.Signature],
+        "Typespec":   [Gladius.Typespec],
+        "Internals":  [Gladius.Registry, Gladius.Coercions,
+                       Gladius.Constraints, Gladius.Gen]
       ]
     ]
   end

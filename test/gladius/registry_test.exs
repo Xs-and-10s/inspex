@@ -1,17 +1,17 @@
-defmodule Inspex.RegistryTest do
+defmodule Gladius.RegistryTest do
   # async: false because some tests exercise the shared ETS table directly.
   # Tests that only use register_local can remain isolated, but the global
   # register/clear tests share state.
   use ExUnit.Case, async: false
 
-  import Inspex
+  import Gladius
 
   setup do
-    Inspex.Registry.clear()
-    Inspex.Registry.clear_local()
+    Gladius.Registry.clear()
+    Gladius.Registry.clear_local()
     on_exit(fn ->
-      Inspex.Registry.clear()
-      Inspex.Registry.clear_local()
+      Gladius.Registry.clear()
+      Gladius.Registry.clear_local()
     end)
   end
 
@@ -21,53 +21,53 @@ defmodule Inspex.RegistryTest do
 
   describe "global registration" do
     test "register/2 and fetch!/1 roundtrip" do
-      Inspex.Registry.register(:test_spec, integer(gt?: 0))
-      fetched = Inspex.Registry.fetch!(:test_spec)
+      Gladius.Registry.register(:test_spec, integer(gt?: 0))
+      fetched = Gladius.Registry.fetch!(:test_spec)
       assert {:ok, 5} = conform(fetched, 5)
     end
 
     test "overwrites previous registration" do
-      Inspex.Registry.register(:overwrite, integer())
-      Inspex.Registry.register(:overwrite, string())
-      fetched = Inspex.Registry.fetch!(:overwrite)
+      Gladius.Registry.register(:overwrite, integer())
+      Gladius.Registry.register(:overwrite, string())
+      fetched = Gladius.Registry.fetch!(:overwrite)
       assert {:ok, "hi"} = conform(fetched, "hi")
       assert {:error, _} = conform(fetched, 42)
     end
 
     test "unregister/1 removes the entry" do
-      Inspex.Registry.register(:gone, integer())
-      Inspex.Registry.unregister(:gone)
-      assert_raise Inspex.UndefinedSpecError, fn ->
-        Inspex.Registry.fetch!(:gone)
+      Gladius.Registry.register(:gone, integer())
+      Gladius.Registry.unregister(:gone)
+      assert_raise Gladius.UndefinedSpecError, fn ->
+        Gladius.Registry.fetch!(:gone)
       end
     end
 
     test "registered?/1 returns true for known names" do
-      Inspex.Registry.register(:exists, string())
-      assert Inspex.Registry.registered?(:exists)
-      refute Inspex.Registry.registered?(:doesnt_exist)
+      Gladius.Registry.register(:exists, string())
+      assert Gladius.Registry.registered?(:exists)
+      refute Gladius.Registry.registered?(:doesnt_exist)
     end
 
     test "all/0 returns a map of all registered specs" do
-      Inspex.Registry.register(:a, integer())
-      Inspex.Registry.register(:b, string())
-      result = Inspex.Registry.all()
+      Gladius.Registry.register(:a, integer())
+      Gladius.Registry.register(:b, string())
+      result = Gladius.Registry.all()
       assert Map.has_key?(result, :a)
       assert Map.has_key?(result, :b)
     end
 
     test "clear/0 removes all entries" do
-      Inspex.Registry.register(:x, integer())
-      Inspex.Registry.register(:y, string())
-      Inspex.Registry.clear()
-      assert Inspex.Registry.all() == %{}
+      Gladius.Registry.register(:x, integer())
+      Gladius.Registry.register(:y, string())
+      Gladius.Registry.clear()
+      assert Gladius.Registry.all() == %{}
     end
 
     test "UndefinedSpecError has a helpful message" do
-      error = %Inspex.UndefinedSpecError{name: :my_missing_spec}
+      error = %Gladius.UndefinedSpecError{name: :my_missing_spec}
       msg = Exception.message(error)
       assert msg =~ "my_missing_spec"
-      assert msg =~ "Inspex.def"
+      assert msg =~ "Gladius.def"
       assert msg =~ "register_local"
     end
   end
@@ -78,64 +78,64 @@ defmodule Inspex.RegistryTest do
 
   describe "local registration" do
     test "register_local/2 is invisible to other processes" do
-      Inspex.Registry.register_local(:local_only, integer())
+      Gladius.Registry.register_local(:local_only, integer())
 
       # Another process cannot see it
       result = Task.async(fn ->
-        Inspex.Registry.registered?(:local_only)
+        Gladius.Registry.registered?(:local_only)
       end) |> Task.await()
 
       refute result
     end
 
     test "local shadows global" do
-      Inspex.Registry.register(:shadowed, integer())
-      Inspex.Registry.register_local(:shadowed, string())
+      Gladius.Registry.register(:shadowed, integer())
+      Gladius.Registry.register_local(:shadowed, string())
 
-      fetched = Inspex.Registry.fetch!(:shadowed)
+      fetched = Gladius.Registry.fetch!(:shadowed)
       assert {:ok, "hi"} = conform(fetched, "hi")
       assert {:error, _} = conform(fetched, 42)
     end
 
     test "after clear_local, global is visible again" do
-      Inspex.Registry.register(:falls_back, integer())
-      Inspex.Registry.register_local(:falls_back, string())
+      Gladius.Registry.register(:falls_back, integer())
+      Gladius.Registry.register_local(:falls_back, string())
 
-      Inspex.Registry.clear_local()
+      Gladius.Registry.clear_local()
 
-      fetched = Inspex.Registry.fetch!(:falls_back)
+      fetched = Gladius.Registry.fetch!(:falls_back)
       assert {:ok, 5}    = conform(fetched, 5)
       assert {:error, _} = conform(fetched, "hi")
     end
 
     test "unregister_local/1 removes only the local entry" do
-      Inspex.Registry.register(:partial, integer())
-      Inspex.Registry.register_local(:partial, string())
+      Gladius.Registry.register(:partial, integer())
+      Gladius.Registry.register_local(:partial, string())
 
-      Inspex.Registry.unregister_local(:partial)
+      Gladius.Registry.unregister_local(:partial)
 
       # Falls back to global integer()
-      fetched = Inspex.Registry.fetch!(:partial)
+      fetched = Gladius.Registry.fetch!(:partial)
       assert {:ok, 5}    = conform(fetched, 5)
       assert {:error, _} = conform(fetched, "str")
     end
 
     test "registered?/1 includes local registrations" do
-      Inspex.Registry.register_local(:local_check, integer())
-      assert Inspex.Registry.registered?(:local_check)
+      Gladius.Registry.register_local(:local_check, integer())
+      assert Gladius.Registry.registered?(:local_check)
     end
   end
 
   # ===========================================================================
-  # Inspex.def/2 macro
+  # Gladius.def/2 macro
   # ===========================================================================
 
   describe "defspec macro" do
     test "registers globally at call time" do
       defspec :macro_email, string(:filled?, format: ~r/@/)
 
-      assert Inspex.Registry.registered?(:macro_email)
-      fetched = Inspex.Registry.fetch!(:macro_email)
+      assert Gladius.Registry.registered?(:macro_email)
+      fetched = Gladius.Registry.fetch!(:macro_email)
       assert {:ok, "a@b.com"} = conform(fetched, "a@b.com")
       assert {:error, _}      = conform(fetched, "notanemail")
     end
@@ -183,7 +183,7 @@ defmodule Inspex.RegistryTest do
     end
 
     test "generates name!/1 that raises ConformError on failure" do
-      assert_raise Inspex.ConformError, fn ->
+      assert_raise Gladius.ConformError, fn ->
         product!(%{name: "", price: -1.0})
       end
     end
@@ -192,7 +192,7 @@ defmodule Inspex.RegistryTest do
       try do
         product!(%{name: ""})
       rescue
-        e in Inspex.ConformError ->
+        e in Gladius.ConformError ->
           msg = Exception.message(e)
           assert msg =~ "product"
           assert msg =~ ":name"
@@ -237,7 +237,7 @@ defmodule Inspex.RegistryTest do
       })
 
       # Register AFTER schema construction — this is the key test
-      Inspex.Registry.register(:level, integer(gte?: 1, lte?: 100))
+      Gladius.Registry.register(:level, integer(gte?: 1, lte?: 100))
 
       assert {:ok, _}    = conform(user, %{name: "Mark", level: 42})
       assert {:error, _} = conform(user, %{name: "Mark", level: 0})
@@ -245,7 +245,7 @@ defmodule Inspex.RegistryTest do
 
     test "circular schema via ref (tree structure)" do
       # A tree node: value + optional children (list of tree nodes)
-      Inspex.Registry.register(:tree_node, schema(%{
+      Gladius.Registry.register(:tree_node, schema(%{
         required(:value)    => integer(),
         optional(:children) => maybe(list_of(ref(:tree_node)))
       }))
@@ -262,14 +262,14 @@ defmodule Inspex.RegistryTest do
     end
 
     test "ref resolves the latest registration (late binding)" do
-      Inspex.Registry.register(:mutable, integer())
+      Gladius.Registry.register(:mutable, integer())
       spec = ref(:mutable)
 
       assert {:ok, 5}    = conform(spec, 5)
       assert {:error, _} = conform(spec, "hi")
 
       # Re-register with a different spec
-      Inspex.Registry.register(:mutable, string())
+      Gladius.Registry.register(:mutable, string())
 
       # The SAME ref struct now resolves differently
       assert {:ok, "hi"} = conform(spec, "hi")

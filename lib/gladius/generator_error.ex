@@ -1,6 +1,6 @@
-defmodule Inspex.GeneratorError do
+defmodule Gladius.GeneratorError do
   @moduledoc """
-  Raised by `Inspex.gen/1` when a generator cannot be inferred from a spec.
+  Raised by `Gladius.gen/1` when a generator cannot be inferred from a spec.
 
   This happens for:
   - Predicate-only specs (`spec(fn x -> ... end)`) — the predicate is opaque
