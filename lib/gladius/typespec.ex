@@ -66,6 +66,7 @@ defmodule Gladius.Typespec do
   # itself still validates the target type.  We use the target type and note
   # the lossiness via lossiness/1.
   # ---------------------------------------------------------------------------
+  def to_typespec(%Gladius.Validate{spec: inner_spec}), do: to_typespec(inner_spec)
   def to_typespec(%Gladius.Transform{spec: inner_spec}), do: to_typespec(inner_spec)
   def to_typespec(%Gladius.Default{spec: inner_spec}), do: to_typespec(inner_spec)
   def to_typespec(%Spec{coercion: fn_} = spec) when not is_nil(fn_) do

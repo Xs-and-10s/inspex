@@ -211,7 +211,7 @@ defmodule Gladius.EctoTest do
   # ---------------------------------------------------------------------------
 
   describe "nested path errors" do
-    test "nested error is keyed on last segment atom" do
+    test "nested schema errors appear in the nested changeset, not parent errors" do
       inner = schema(%{required(:zip) => string(size?: 5)})
       outer = schema(%{
         required(:name)    => string(:filled?),
@@ -220,17 +220,18 @@ defmodule Gladius.EctoTest do
 
       cs = Gladius.Ecto.changeset(outer, %{name: "Mark", address: %{zip: "bad"}})
       refute cs.valid?
-      # path: [:address, :zip] → keyed on :zip
-      assert Keyword.has_key?(cs.errors, :zip)
+      # Nested errors live in the nested changeset, not the parent's errors list
+      refute Keyword.has_key?(cs.errors, :zip)
+      assert %Ecto.Changeset{} = cs.changes.address
+      assert Keyword.has_key?(cs.changes.address.errors, :zip)
     end
 
-    test "root-level error (empty path) is keyed on :base" do
-      # Trigger a root-level type error by passing a non-map value
-      # Use a schema wrapping to get a root path error surfaced
+    test "list_of element errors surface in parent changeset under :base" do
       s = schema(%{required(:items) => list_of(integer(gte?: 0))})
       cs = Gladius.Ecto.changeset(s, %{items: [1, -1, -2]})
       refute cs.valid?
-      # list_of errors have path [field, index] → last segment is integer → :base
+      # list_of is not a nested schema — its element errors stay on the parent.
+      # path: [:items, index] → last segment is integer → keyed as :base
       assert Keyword.has_key?(cs.errors, :base)
     end
   end

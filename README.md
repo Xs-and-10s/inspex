@@ -18,6 +18,9 @@
 - [Default Values](#default-values)
 - [Post-Validation Transforms](#post-validation-transforms)
 - [Struct Validation](#struct-validation)
+- [Custom Error Messages](#custom-error-messages)
+- [Partial Schemas](#partial-schemas)
+- [Cross-Field Validation](#cross-field-validation)
 - [Registry](#registry)
 - [Coercion](#coercion)
 - [Generators](#generators)
@@ -35,7 +38,7 @@
 # mix.exs
 def deps do
   [
-    {:gladius, "~> 0.2"}
+    {:gladius, "~> 0.3"}
   ]
 end
 ```
@@ -427,6 +430,129 @@ Transforms run before struct wrapping; defaults are injected before struct wrapp
 
 ---
 
+## Custom Error Messages
+
+Every spec builder and combinator accepts a `message:` option that overrides the generated error string for any failure of that spec.
+
+```elixir
+# String override — returned as-is, bypasses translator
+string(:filled?, message: "can't be blank")
+integer(gte?: 18, message: "you must be at least 18")
+coerce(integer(), from: :string, message: "must be a valid number")
+transform(string(), &String.trim/1, message: "normalization failed")
+maybe(string(:filled?), message: "must be a non-empty string or nil")
+```
+
+### Tuple form — i18n aware
+
+For internationalized applications, pass a `{domain, msgid, bindings}` tuple. Without a configured translator the `msgid` is used as-is. With a translator it is dispatched for translation.
+
+```elixir
+string(:filled?, message: {"errors", "can't be blank", []})
+integer(gte?: 18, message: {"errors", "must be at least %{min}", [min: 18]})
+```
+
+### Configuring a translator
+
+```elixir
+# config/config.exs
+config :gladius, translator: MyApp.GladiusTranslator
+
+defmodule MyApp.GladiusTranslator do
+  @behaviour Gladius.Translator
+
+  @impl Gladius.Translator
+  def translate(domain, msgid, bindings) do
+    # Gettext, LLM translation, or anything else
+    Gettext.dgettext(MyAppWeb.Gettext, domain || "errors", msgid, bindings)
+  end
+end
+```
+
+### Structured error metadata
+
+Every `%Gladius.Error{}` now carries `message_key` and `message_bindings` so translators and custom renderers can work from structured data rather than matching on English strings:
+
+```elixir
+{:error, [error]} = conform(integer(gte?: 18), 15)
+error.message_key      #=> :gte?
+error.message_bindings #=> [min: 18]
+error.message          #=> "must be >= 18"  (or translated if configured)
+```
+
+---
+
+## Partial Schemas
+
+`selection/2` returns a new schema containing only the named fields, all made optional. The primary use case is PATCH endpoints — validate whatever subset of fields the client chose to send.
+
+```elixir
+user_schema = schema(%{
+  required(:name)  => string(:filled?),
+  required(:email) => string(:filled?, format: ~r/@/),
+  required(:age)   => integer(gte?: 0),
+  optional(:role)  => atom(in?: [:admin, :user])
+})
+
+patch = selection(user_schema, [:name, :email, :age, :role])
+
+Gladius.conform(patch, %{})              #=> {:ok, %{}}        # nothing sent — ok
+Gladius.conform(patch, %{name: "Mark"}) #=> {:ok, %{name: "Mark"}}  # partial — ok
+Gladius.conform(patch, %{age: -1})      #=> {:error, [...]}    # present but invalid
+```
+
+**Semantics:**
+- Selected keys absent from input → omitted from output, no error
+- Selected keys present → validated by their original spec (coercions, transforms, defaults all apply)
+- Keys not in the selection → rejected as unknown (closed schema; prevents mass-assignment)
+- `open?` is inherited from the source schema
+
+---
+
+## Cross-Field Validation
+
+`validate/2` attaches validation rules that run **after** the inner spec fully passes. Rules receive the shaped output and can produce errors referencing any field.
+
+```elixir
+schema(%{
+  required(:start_date) => string(:filled?),
+  required(:end_date)   => string(:filled?)
+})
+|> validate(fn %{start_date: s, end_date: e} ->
+  if e >= s, do: :ok, else: {:error, :end_date, "must be on or after start date"}
+end)
+```
+
+Chain multiple rules — all run and all errors accumulate:
+
+```elixir
+schema(%{
+  required(:password) => string(:filled?),
+  required(:confirm)  => string(:filled?)
+})
+|> validate(fn %{password: p, confirm: c} ->
+  if p == c, do: :ok, else: {:error, :base, "passwords do not match"}
+end)
+|> validate(&check_password_strength/1)
+```
+
+**Rule return values:**
+
+```elixir
+:ok                                               # passes
+{:error, :field_name, "message"}                  # single named-field error
+{:error, :base, "message"}                        # schema-level error
+{:error, [{:field_a, "msg"}, {:field_b, "msg"}]}  # multiple errors
+```
+
+**Semantics:**
+- Rules only run when the inner spec **fully** passes — never on partial data
+- All rules always run; errors accumulate across all of them (no short-circuiting)
+- Exceptions from rule functions are caught and returned as `%Error{predicate: :validate}`
+- Rules receive the **shaped** output — coercions and transforms have already run
+
+---
+
 ## Registry
 
 ### `defspec` — globally named spec
@@ -745,6 +871,10 @@ end
 | Post-validation transforms | ✓ | — | — | — |
 | Struct validation | ✓ | — | — | — |
 | Ecto integration | ✓ | — | — | ✓ |
+| Custom error messages | ✓ | — | — | — |
+| Partial schemas (`selection`) | ✓ | ✓ | — | — |
+| Cross-field validation | ✓ | — | — | ✓ |
+| i18n / translator hook | ✓ | — | — | — |
 | Typespec bridge | ✓ | — | — | — |
 | `@type` generation | ✓ | — | — | — |
 | Circular schemas (`ref`) | ✓ | — | — | — |
@@ -768,6 +898,8 @@ end
 | `Gladius.Error` | Validation failure struct |
 | `Gladius.SignatureError` | Raised on signature violation |
 | `Gladius.ConformError` | Raised by `defschema name!/1` |
+| `Gladius.Translator` | Behaviour for plugging in a custom message translator |
+| `Gladius.Ecto` | Optional Ecto changeset integration |
 
 ### Complete `Gladius` function signatures
 
@@ -890,6 +1022,34 @@ With coerce: coerce runs before validate; transform runs after
 With default: absent key bypasses both inner spec and transform
 ```
 
+### `selection/2` semantics
+
+```
+selection(schema, field_names)
+
+Selected field absent  → omitted from output; no error
+Selected field present → validated by original spec; all coercions/transforms apply
+Non-selected field     → unknown-key error (closed schema); passes through (open schema)
+open? inherited        → selection of open_schema is also open
+```
+
+### `validate/2` semantics
+
+```
+validate(spec, rule_fn)  — attaches one rule
+Multiple calls           → all rules appended to same %Validate{}; no nesting
+
+rule_fn return values:
+  :ok                                → passes
+  {:error, :field, "msg"}            → single field error
+  {:error, :base, "msg"}             → root-level error (path: [])
+  {:error, [{:field, "msg"}, ...]}   → multiple errors
+
+Rules run only when inner spec fully passes.
+All rules run; errors accumulate (no short-circuit).
+Exceptions caught → %Error{predicate: :validate}.
+```
+
 ### `conform_struct/2` semantics
 
 ```
@@ -920,13 +1080,15 @@ Transforms and defaults run before struct wrapping.
 
 ```elixir
 %Gladius.Error{
-  path:      [atom() | non_neg_integer()],
-  predicate: atom() | nil,
+  path:             [atom() | non_neg_integer()],
+  predicate:        atom() | nil,
   # :filled?, :gte?, :gt?, :lte?, :lt?, :format, :in?,
-  # :min_length, :max_length, :size?, :coerce, :transform
-  value:     term(),
-  message:   String.t(),
-  meta:      map()
+  # :min_length, :max_length, :size?, :coerce, :transform, :validate
+  value:            term(),
+  message:          String.t(),          # translated if translator configured
+  message_key:      atom() | nil,        # predicate key for translator lookup
+  message_bindings: keyword(),           # dynamic values (e.g. [min: 18])
+  meta:             map()
 }
 ```
 
@@ -945,6 +1107,8 @@ conformable() =
   | Gladius.Schema    # schema / open_schema
   | Gladius.Default   # default
   | Gladius.Transform # transform
+  | Gladius.Validate  # validate
+  | Gladius.Schema    # selection (returns a %Schema{})
 ```
 
 ### `Gladius.Registry` API
@@ -986,3 +1150,7 @@ Gladius.Coercions.lookup(source, target)           :: function()
 10. `signature` is prod-safe — compiles away entirely in `:prod`.
 11. Coercion registry is global and permanent — `Gladius.Coercions.register/2` uses `:persistent_term`. Call once at startup.
 12. `gen/1` raises in `:prod`.
+13. `message:` overrides all error messages from a spec — string values bypass the translator; `{domain, msgid, bindings}` tuples are dispatched through it. `message_key` and `message_bindings` on `%Error{}` are always populated from the underlying failure regardless of override.
+14. `selection/2` returns a `%Gladius.Schema{}` — all selected keys are optional; original specs (coercions, transforms, defaults, messages) are preserved. Non-selected keys in input are rejected by closed schemas.
+15. `validate/2` rules run only when the inner spec fully passes. All rules run; errors accumulate. Exceptions in rules are caught and returned as `%Error{predicate: :validate}`. Multiple `validate/2` calls chain by appending to the same `%Validate{}` struct, not nesting.
+16. `Gladius.Ecto.traverse_errors/2` recursively collects errors from nested changesets. Use it instead of `Ecto.Changeset.traverse_errors/2` — Ecto's built-in only recurses into declared embed/assoc fields.

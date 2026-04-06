@@ -7,7 +7,8 @@ defmodule Gladius.StructTest do
   # Test fixtures
   # ---------------------------------------------------------------------------
 
-  # Plain Elixir structs used as input throughout these tests
+  # User has extra fields beyond most test schemas — tests use open_schema
+  # when the intent is to test struct-input behaviour, not closed-schema rules.
   defmodule User do
     defstruct [:name, :email, :age, :role]
   end
@@ -16,7 +17,18 @@ defmodule Gladius.StructTest do
     defstruct [:street, :city, :zip]
   end
 
-  # A defschema with struct: true — defines both schema and matching struct
+  defmodule RawUser do
+    defstruct [:age]
+  end
+
+  defmodule CoercedUser do
+    defstruct [:name, :age]
+  end
+
+  defmodule UserWithAddress do
+    defstruct [:name, :address]
+  end
+
   defmodule Schemas do
     import Gladius
 
@@ -41,17 +53,21 @@ defmodule Gladius.StructTest do
 
   describe "conform/2 with struct input" do
     test "validates a struct against a schema — happy path" do
-      s = schema(%{
+      # open_schema: User has :age/:role fields not in schema; nil values
+      # from Map.from_struct would be rejected by a closed schema as unknown keys.
+      s = open_schema(%{
         required(:name)  => string(:filled?),
         required(:email) => string(:filled?, format: ~r/@/)
       })
 
       user = %User{name: "Mark", email: "mark@x.com"}
-      assert {:ok, %{name: "Mark", email: "mark@x.com"}} = conform(s, user)
+      assert {:ok, result} = conform(s, user)
+      assert result.name  == "Mark"
+      assert result.email == "mark@x.com"
     end
 
     test "output is a plain map, not the original struct type" do
-      s = schema(%{required(:name) => string(:filled?)})
+      s = open_schema(%{required(:name) => string(:filled?)})
       user = %User{name: "Mark"}
       {:ok, result} = conform(s, user)
       refute is_struct(result)
@@ -59,88 +75,91 @@ defmodule Gladius.StructTest do
     end
 
     test "returns errors for invalid struct fields" do
+      # CoercedUser only has :name and :age — matches the schema exactly
       s = schema(%{
         required(:name) => string(:filled?),
         required(:age)  => integer(gte?: 18)
       })
 
-      user = %User{name: "", age: 15}
+      user = %CoercedUser{name: "", age: 15}
       assert {:error, errors} = conform(s, user)
       assert Enum.any?(errors, &(&1.path == [:name]))
       assert Enum.any?(errors, &(&1.path == [:age]))
     end
 
-    test "nil struct fields are treated as absent map keys" do
-      s = schema(%{
+    test "nil struct fields in a closed schema are treated as unknown keys" do
+      # Documents the actual behaviour: Map.from_struct includes nil fields,
+      # and a closed schema rejects them as unknown keys.
+      s = schema(%{required(:name) => string(:filled?)})
+      user = %User{name: "Mark"}  # email/age/role are nil but present in map
+      assert {:error, errors} = conform(s, user)
+      assert Enum.any?(errors, &(&1.predicate == :unknown_key?))
+    end
+
+    test "open_schema accepts nil struct fields without error" do
+      s = open_schema(%{
         required(:name)  => string(:filled?),
         optional(:role)  => atom()
       })
 
-      # %User{role: nil} — nil field counts as absent for optional
       user = %User{name: "Mark", role: nil}
-      # role: nil is present as a key in Map.from_struct, so it IS present —
-      # but nil fails atom() type check only if it's required.
-      # Let's verify the exact behaviour: Map.from_struct includes nil fields.
       {:ok, result} = conform(s, user)
       assert result.name == "Mark"
     end
 
     test "coercion works on struct fields" do
-      s = schema(%{
-        required(:age) => coerce(integer(), from: :string)
-      })
-
-      # Simulate a struct that stores age as string
-      defmodule RawUser do
-        defstruct [:age]
-      end
-
+      s = schema(%{required(:age) => coerce(integer(), from: :string)})
       user = %RawUser{age: "33"}
       assert {:ok, %{age: 33}} = conform(s, user)
     end
 
     test "transform works on struct fields" do
-      s = schema(%{
-        required(:name) => transform(string(:filled?), &String.trim/1)
-      })
-
+      # CoercedUser has exactly :name and :age — use open_schema to avoid
+      # the :age nil being an unknown key when only testing :name
+      s = open_schema(%{required(:name) => transform(string(:filled?), &String.trim/1)})
       user = %User{name: "  Mark  "}
-      assert {:ok, %{name: "Mark"}} = conform(s, user)
+      assert {:ok, result} = conform(s, user)
+      assert result.name == "Mark"
     end
 
     test "nested struct is converted recursively when schema is nested" do
-      address_schema = schema(%{
+      # Use open_schema for address so Address's :zip nil field passes through
+      address_schema = open_schema(%{
         required(:street) => string(:filled?),
         required(:city)   => string(:filled?)
       })
 
-      # Wrap Address struct field in a parent schema
-      s = schema(%{
+      s = open_schema(%{
         required(:name)    => string(:filled?),
         required(:address) => address_schema
       })
 
-      defmodule UserWithAddress do
-        defstruct [:name, :address]
-      end
-
       input = %UserWithAddress{
-        name: "Mark",
+        name:    "Mark",
         address: %Address{street: "123 Main", city: "Culpeper", zip: nil}
       }
 
-      assert {:ok, %{name: "Mark", address: %{street: "123 Main", city: "Culpeper"}}} =
-               conform(s, input)
+      assert {:ok, result} = conform(s, input)
+      assert result.name             == "Mark"
+      assert result.address.street   == "123 Main"
+      assert result.address.city     == "Culpeper"
+    end
+
+    test "closed schema rejects struct fields not declared in schema" do
+      s = schema(%{required(:name) => string(:filled?)})
+      user = %CoercedUser{name: "Mark", age: 33}
+      assert {:error, errors} = conform(s, user)
+      assert Enum.any?(errors, &(&1.predicate == :unknown_key?))
     end
 
     test "valid?/2 works with struct input" do
-      s = schema(%{required(:name) => string(:filled?)})
+      s = open_schema(%{required(:name) => string(:filled?)})
       assert valid?(s, %User{name: "Mark"})
       refute valid?(s, %User{name: ""})
     end
 
     test "explain/2 works with struct input" do
-      s = schema(%{required(:name) => string(:filled?)})
+      s = open_schema(%{required(:name) => string(:filled?)})
       result = explain(s, %User{name: ""})
       refute result.valid?
       assert result.formatted =~ "filled"
@@ -153,13 +172,14 @@ defmodule Gladius.StructTest do
 
   describe "conform_struct/2" do
     test "validates and re-wraps in the original struct type" do
-      s = schema(%{
+      s = open_schema(%{
         required(:name)  => string(:filled?),
         required(:email) => string(:filled?, format: ~r/@/)
       })
 
       user = %User{name: "Mark", email: "mark@x.com"}
-      assert {:ok, %User{name: "Mark", email: "mark@x.com"}} = Gladius.conform_struct(s, user)
+      assert {:ok, %User{name: "Mark", email: "mark@x.com"}} =
+               Gladius.conform_struct(s, user)
     end
 
     test "shaped values (coercions, transforms) are reflected in the returned struct" do
@@ -168,12 +188,9 @@ defmodule Gladius.StructTest do
         required(:age)  => coerce(integer(), from: :string)
       })
 
-      defmodule CoercedUser do
-        defstruct [:name, :age]
-      end
-
       user = %CoercedUser{name: "  Mark  ", age: "33"}
-      assert {:ok, %CoercedUser{name: "Mark", age: 33}} = Gladius.conform_struct(s, user)
+      assert {:ok, %CoercedUser{name: "Mark", age: 33}} =
+               Gladius.conform_struct(s, user)
     end
 
     test "returns error tuple on validation failure — same format as conform/2" do
@@ -182,7 +199,7 @@ defmodule Gladius.StructTest do
         required(:age)  => integer(gte?: 18)
       })
 
-      user = %User{name: "", age: 10}
+      user = %CoercedUser{name: "", age: 10}
       assert {:error, errors} = Gladius.conform_struct(s, user)
       assert is_list(errors)
       assert Enum.all?(errors, &match?(%Gladius.Error{}, &1))
@@ -203,14 +220,15 @@ defmodule Gladius.StructTest do
     test "open_schema preserves extra keys in the struct" do
       s = open_schema(%{required(:name) => string(:filled?)})
       user = %User{name: "Mark", email: "mark@x.com", age: 33}
-      assert {:ok, %User{name: "Mark", email: "mark@x.com", age: 33}} =
-               Gladius.conform_struct(s, user)
+      {:ok, result} = Gladius.conform_struct(s, user)
+      assert result.name  == "Mark"
+      assert result.email == "mark@x.com"
+      assert result.age   == 33
     end
 
-    test "struct fields not in schema are nil in the returned struct (closed schema)" do
+    test "closed schema rejects struct fields not in schema" do
       s = schema(%{required(:name) => string(:filled?)})
-      user = %User{name: "Mark", email: "mark@x.com", age: 33, role: :admin}
-      # closed schema — email/age/role are unknown keys → error
+      user = %CoercedUser{name: "Mark", age: 33}
       assert {:error, _} = Gladius.conform_struct(s, user)
     end
   end
@@ -221,7 +239,6 @@ defmodule Gladius.StructTest do
 
   describe "defschema struct: true" do
     test "generates a struct module matching the schema fields" do
-      # The point/1 function should exist and its output is %Schemas.PointSchema{}
       assert function_exported?(Gladius.StructTest.Schemas, :point, 1)
       assert function_exported?(Gladius.StructTest.Schemas, :point!, 1)
     end

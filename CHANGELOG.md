@@ -7,6 +7,137 @@ Gladius adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.3.0] — Unreleased
+
+### Added
+
+#### Custom error messages — `message:` option
+
+Every spec builder and combinator now accepts a `message:` option that overrides
+the generated error string for any failure. Accepts two forms:
+
+- **String** — returned as-is, bypasses any configured translator.
+- **Tuple `{domain, msgid, bindings}`** — dispatched through a translator if
+  configured; falls back to `msgid` when no translator is set.
+
+```elixir
+string(:filled?, message: "can't be blank")
+integer(gte?: 18, message: {"errors", "must be at least %{min}", [min: 18]})
+coerce(integer(), from: :string, message: "must be a valid number")
+transform(string(), &String.trim/1, message: "normalization failed")
+maybe(string(:filled?), message: "must be a non-empty string or nil")
+```
+
+Supported on: all primitive builders (`string`, `integer`, `float`, `number`,
+`boolean`, `atom`, `map`, `list`, `any`), `coerce/2`, `transform/2`, `maybe/1`,
+`default/2`, `all_of/1`, `any_of/1`, `not_spec/1`, `schema/1`, `open_schema/1`,
+and the `spec/1` macro.
+
+#### i18n translator hook — `Gladius.Translator`
+
+New `Gladius.Translator` behaviour for plugging in a custom message translator.
+Configure via application env:
+
+```elixir
+config :gladius, translator: MyApp.GladiusTranslator
+```
+
+When configured, all built-in error messages pass through
+`translator.translate(domain, msgid, bindings)`. Plain string `message:` overrides
+bypass the translator. Designed to be compatible with Gettext, LLM-based
+translation, or any custom backend.
+
+#### Structured error metadata — `message_key` and `message_bindings`
+
+`%Gladius.Error{}` gains two new fields populated by every built-in error:
+
+- `message_key :: atom() | nil` — the predicate that failed (`:gte?`, `:filled?`,
+  `:type?`, `:coerce`, `:transform`, `:validate`, etc.)
+- `message_bindings :: keyword()` — dynamic values used in the message
+  (e.g. `[min: 18]` for a `gte?` failure, `[format: ~r/@/]` for a format failure)
+
+These fields are always populated regardless of whether `message:` is set,
+allowing translators and custom renderers to work from structured data.
+
+#### Partial schemas — `selection/2`
+
+`selection/2` takes an existing `%Gladius.Schema{}` and a list of field names,
+returning a new schema with only those fields — all made optional. The primary
+use case is PATCH endpoints.
+
+```elixir
+patch = selection(user_schema, [:name, :email, :age, :role])
+
+Gladius.conform(patch, %{})              #=> {:ok, %{}}
+Gladius.conform(patch, %{name: "Mark"}) #=> {:ok, %{name: "Mark"}}
+Gladius.conform(patch, %{age: -1})      #=> {:error, [...]}
+```
+
+- Selected fields absent → omitted from output, no error
+- Selected fields present → validated by their original spec; all coercions,
+  transforms, defaults, and custom messages apply
+- Non-selected fields in input → rejected by closed schemas (prevents mass-assignment)
+- `open?` is inherited from the source schema
+
+#### Cross-field validation — `validate/2`
+
+`validate/2` attaches validation rules that run only after the inner spec fully
+passes. Multiple calls chain by appending rules to the same `%Gladius.Validate{}`
+struct — they do not nest.
+
+```elixir
+schema(%{
+  required(:start_date) => string(:filled?),
+  required(:end_date)   => string(:filled?)
+})
+|> validate(fn %{start_date: s, end_date: e} ->
+  if e >= s, do: :ok, else: {:error, :end_date, "must be on or after start date"}
+end)
+|> validate(&check_business_hours/1)
+```
+
+Rule return values: `:ok`, `{:error, field, message}`, `{:error, :base, message}`,
+`{:error, [{field, message}]}`. Exceptions are caught and returned as
+`%Error{predicate: :validate}`. All rules run; errors accumulate.
+
+#### Ecto nested changeset support + `Gladius.Ecto.traverse_errors/2`
+
+`Gladius.Ecto.changeset/2-3` now builds proper nested `%Ecto.Changeset{}`
+structs for fields whose spec is (or wraps) a `%Gladius.Schema{}`. Nested
+errors appear in the nested changeset rather than the parent's `errors` list,
+making them compatible with Phoenix `inputs_for` and deep error inspection.
+
+New `Gladius.Ecto.traverse_errors/2` recursively collects errors from nested
+changesets. Use it instead of `Ecto.Changeset.traverse_errors/2` — Ecto's
+built-in only recurses into declared embed/assoc typed fields.
+
+```elixir
+cs = Gladius.Ecto.changeset(user_schema, params)
+Gladius.Ecto.traverse_errors(cs, fn {msg, _} -> msg end)
+#=> %{name: ["can't be blank"], address: %{zip: ["must be exactly 5 characters"]}}
+```
+
+Also fixed: string-keyed nested params are now deep-atomized before conforming,
+so Phoenix-style `%{"address" => %{"zip" => "bad"}}` params work correctly.
+
+### Changed
+
+- `%Gladius.Error{}` — two new fields: `message_key :: atom() | nil` and
+  `message_bindings :: keyword()`. Existing fields unchanged; new fields default
+  to `nil` and `[]` respectively, so existing pattern matches continue to work.
+- `%Gladius.Spec{}`, `%Gladius.All{}`, `%Gladius.Any{}`, `%Gladius.Not{}`,
+  `%Gladius.Maybe{}`, `%Gladius.Schema{}`, `%Gladius.Default{}`,
+  `%Gladius.Transform{}` — new `message` field (defaults to `nil`). Existing
+  struct literals without `message:` continue to work.
+- `conformable()` type union extended with `Gladius.Validate`.
+- `Gladius.Gen.gen/1` and `Gladius.Typespec.to_typespec/1` handle `%Validate{}`
+  by delegating to the inner spec.
+- `Gladius.Ecto.changeset/2-3` — nested schema fields produce nested changesets
+  rather than plain map changes. `cs.changes.nested_field` is now an
+  `%Ecto.Changeset{}` rather than a raw map for schema-typed fields.
+
+---
+
 ## [0.2.0] — Unreleased
 
 ### Added
@@ -196,5 +327,6 @@ First public release.
 
 ---
 
+[0.3.0]: https://github.com/Xs-and-10s/gladius/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Xs-and-10s/gladius/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Xs-and-10s/gladius/releases/tag/v0.1.0

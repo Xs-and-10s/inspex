@@ -45,7 +45,7 @@ defmodule Gladius do
 
   alias Gladius.{
     Spec, All, Any, Not, Maybe, Ref, ListOf, Cond, Schema, SchemaKey,
-    Default, Transform, Error, ExplainResult, Constraints
+    Default, Transform, Validate, Error, ExplainResult, Constraints
   }
 
   # ---------------------------------------------------------------------------
@@ -64,6 +64,7 @@ defmodule Gladius do
           | Schema.t()
           | Default.t()
           | Transform.t()
+          | Validate.t()
 
   @type conform_result :: {:ok, term()} | {:error, [Error.t()]}
 
@@ -671,6 +672,86 @@ defmodule Gladius do
   @spec open_schema(map()) :: Schema.t()
   def open_schema(key_map) when is_map(key_map), do: build_schema(key_map, true)
 
+  @doc """
+  Returns a new schema containing only the named keys, all made optional.
+
+  The primary use case is PATCH endpoints — validate whichever subset of
+  fields the client chose to send, without requiring all fields to be present.
+
+  ## Behaviour
+
+  - Selected keys that are **absent** from input: omitted from output, no error.
+  - Selected keys that are **present**: validated by their original spec.
+  - Keys **not** in `field_names` are dropped from the schema entirely. For
+    closed schemas they will produce an unknown-key error if present in input,
+    preventing mass-assignment of unexpected fields.
+  - `open?` is inherited from the source schema.
+
+  ## Example
+
+      user_schema = schema(%{
+        required(:name)  => string(:filled?),
+        required(:email) => string(:filled?, format: ~r/@/),
+        required(:age)   => integer(gte?: 0),
+        optional(:role)  => atom(in?: [:admin, :user])
+      })
+
+      patch = selection(user_schema, [:name, :email, :age, :role])
+
+      Gladius.conform(patch, %{name: "Mark"})
+      #=> {:ok, %{name: "Mark"}}          # only name provided — fine
+
+      Gladius.conform(patch, %{})
+      #=> {:ok, %{}}                       # nothing provided — fine
+
+      Gladius.conform(patch, %{age: -1})
+      #=> {:error, [%Error{path: [:age], ...}]}  # present but invalid — error
+
+  """
+  @spec selection(Schema.t(), [atom()]) :: Schema.t()
+  def selection(%Schema{keys: keys, open?: open?}, field_names) when is_list(field_names) do
+    selected =
+      keys
+      |> Enum.filter(&(&1.name in field_names))
+      |> Enum.map(&%{&1 | required: false})
+
+    %Schema{keys: selected, open?: open?}
+  end
+
+  @doc """
+  Wraps any conformable with one or more cross-field validation rules that run
+  **after** the inner spec fully passes.
+
+  Rules are functions of arity 1 that receive the shaped output and return:
+
+      :ok                                               # passes
+      {:error, :field_name, "message"}                  # single named-field error
+      {:error, :base, "message"}                        # root-level error
+      {:error, [{:field_a, "msg"}, {:field_b, "msg"}]}  # multiple errors
+
+  Multiple `validate/2` calls chain by appending rules to the same struct:
+
+      schema(%{
+        required(:start) => string(:filled?),
+        required(:end)   => string(:filled?)
+      })
+      |> validate(fn %{start: s, end: e} ->
+        if e >= s, do: :ok, else: {:error, :end, "must be after start"}
+      end)
+      |> validate(&check_business_hours/1)
+
+  Rules only run when the inner spec fully succeeds. All rules run and all
+  errors accumulate — there is no short-circuiting between rules.
+  """
+  @spec validate(conformable(), (term() -> Validate.rule_result())) :: Validate.t()
+  def validate(%Validate{rules: existing} = v, fun) when is_function(fun, 1) do
+    %{v | rules: existing ++ [fun]}
+  end
+
+  def validate(spec, fun) when is_function(fun, 1) do
+    %Validate{spec: spec, rules: [fun]}
+  end
+
   @doc "Marks a schema map key as required. Returns a tagged tuple used by `schema/1`."
   @spec required(atom()) :: {:required, atom()}
   def required(name) when is_atom(name), do: {:required, name}
@@ -1067,6 +1148,55 @@ defmodule Gladius do
       {:ok, shaped}
     else
       {:error, all_errors}
+    end
+  end
+
+  # --- Validate (cross-field rules) ------------------------------------------
+
+  def conform(%Validate{spec: inner_spec, rules: rules}, value) do
+    case conform(inner_spec, value) do
+      {:error, _} = err ->
+        # Inner spec failed — cross-field rules must not run on invalid data
+        err
+
+      {:ok, shaped} ->
+        rule_errors =
+          Enum.flat_map(rules, fn rule ->
+            try do
+              case rule.(shaped) do
+                :ok ->
+                  []
+
+                {:error, field, message} when is_atom(field) ->
+                  path = if field == :base, do: [], else: [field]
+                  [%Error{path: path, message: message, predicate: :validate,
+                          message_key: :validate, message_bindings: [field: field]}]
+
+                {:error, pairs} when is_list(pairs) ->
+                  Enum.map(pairs, fn {field, message} ->
+                    path = if field == :base, do: [], else: [field]
+                    %Error{path: path, message: message, predicate: :validate,
+                           message_key: :validate, message_bindings: [field: field]}
+                  end)
+              end
+            rescue
+              e ->
+                [%Error{
+                  path:             [],
+                  predicate:        :validate,
+                  value:            shaped,
+                  message:          "validate rule raised: " <> Exception.message(e),
+                  message_key:      :validate,
+                  message_bindings: [reason: Exception.message(e)]
+                }]
+            end
+          end)
+
+        if rule_errors == [] do
+          {:ok, shaped}
+        else
+          {:error, rule_errors}
+        end
     end
   end
 

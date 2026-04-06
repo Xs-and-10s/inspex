@@ -68,6 +68,7 @@ defmodule Gladius.Gen do
   """
   @spec gen(Gladius.conformable()) :: term()
   @doc false
+  def gen(%Gladius.Validate{spec: inner_spec}), do: gen(inner_spec)
   def gen(%Gladius.Transform{spec: inner_spec}), do: gen(inner_spec)
   def gen(%Gladius.Default{spec: inner_spec}), do: gen(inner_spec)
   def gen(%Spec{generator: g}) when not is_nil(g), do: g

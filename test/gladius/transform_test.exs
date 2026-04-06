@@ -195,7 +195,7 @@ defmodule Gladius.TransformTest do
       assert {:error, errors} = conform(s, %{name: "Mark", email: "not-an-email"})
       assert length(errors) == 2
       assert Enum.any?(errors, &(&1.predicate == :transform))
-      assert Enum.any?(errors, &(&1.predicate == :format?))
+      assert Enum.any?(errors, &(&1.predicate == :format))
     end
   end
 
