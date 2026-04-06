@@ -752,6 +752,69 @@ defmodule Gladius do
     %Validate{spec: spec, rules: [fun]}
   end
 
+  @doc """
+  Extends an existing schema with additional or overriding keys.
+
+  Extension keys take precedence over same-named base keys. Non-overridden
+  base keys are preserved in their original order; new keys from the extension
+  are appended after them.
+
+  `open?` is inherited from the base schema unless explicitly overridden via
+  the `open:` option in `extend/3`.
+
+  ## Usage
+
+      base = schema(%{
+        required(:name)  => string(:filled?),
+        required(:email) => string(:filled?, format: ~r/@/),
+        required(:age)   => integer(gte?: 0)
+      })
+
+      # Add new fields
+      extended = extend(base, %{optional(:role) => atom(in?: [:admin, :user])})
+
+      # Override a field's spec
+      stricter = extend(base, %{required(:age) => integer(gte?: 21)})
+
+      # Change required → optional (or vice versa)
+      lenient = extend(base, %{optional(:email) => string()})
+
+  ## Create / update / patch pattern
+
+      create = extend(base, %{required(:password) => string(min_length: 8)})
+      update = extend(base, %{optional(:role) => atom(in?: [:admin, :user])})
+      patch  = selection(update, [:name, :email, :age, :role])
+
+  """
+  @spec extend(Schema.t(), map()) :: Schema.t()
+  @spec extend(Schema.t(), map(), [{:open?, boolean()}]) :: Schema.t()
+  def extend(%Schema{keys: base_keys, open?: base_open?}, extension_map, opts \\ [])
+      when is_map(extension_map) do
+    open? = Keyword.get(opts, :open?, base_open?)
+
+    # Parse extension map into SchemaKey structs (same logic as build_schema)
+    extension_keys =
+      Enum.map(extension_map, fn
+        {{:required, name}, spec} -> %SchemaKey{name: name, spec: spec, required: true}
+        {{:optional, name}, spec} -> %SchemaKey{name: name, spec: spec, required: false}
+        {name, spec} when is_atom(name) -> %SchemaKey{name: name, spec: spec, required: true}
+      end)
+
+    extension_by_name = Map.new(extension_keys, &{&1.name, &1})
+
+    # Base keys: override in place if present in extension, otherwise keep as-is
+    merged_base =
+      Enum.map(base_keys, fn base_key ->
+        Map.get(extension_by_name, base_key.name, base_key)
+      end)
+
+    # New keys: those in extension not already in base (preserve extension order)
+    base_names = MapSet.new(base_keys, & &1.name)
+    new_keys   = Enum.reject(extension_keys, &MapSet.member?(base_names, &1.name))
+
+    %Schema{keys: merged_base ++ new_keys, open?: open?}
+  end
+
   @doc "Marks a schema map key as required. Returns a tagged tuple used by `schema/1`."
   @spec required(atom()) :: {:required, atom()}
   def required(name) when is_atom(name), do: {:required, name}

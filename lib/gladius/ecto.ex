@@ -85,7 +85,7 @@ defmodule Gladius.Ecto do
   """
 
   if Code.ensure_loaded?(Ecto.Changeset) do
-    alias Gladius.{Schema, SchemaKey, Spec, Default, Transform, Maybe, All, Any, Ref, Validate, Error}
+    alias Gladius.{Schema, SchemaKey, Spec, Default, Transform, Maybe, All, Any, Ref, Validate, ListOf, Error}
 
     @doc """
     Builds an `Ecto.Changeset` from a Gladius schema and params map.
@@ -121,7 +121,9 @@ defmodule Gladius.Ecto do
       # handled by recursive nested changesets rather than the parent's errors list.
       nested_field_names =
         gladius_schema.keys
-        |> Enum.filter(fn %SchemaKey{spec: spec} -> unwrap_to_schema(spec) != nil end)
+        |> Enum.filter(fn %SchemaKey{spec: spec} ->
+          unwrap_to_schema(spec) != nil or unwrap_list_schema(spec) != nil
+        end)
         |> MapSet.new(& &1.name)
 
       cs =
@@ -148,44 +150,51 @@ defmodule Gladius.Ecto do
         end
 
       # Replace plain maps with nested changesets for any field whose spec
-      # is (or wraps) a %Schema{}.
-      apply_nested(cs, gladius_schema.keys, atom_params)
+      # is (or wraps) a %Schema{} or list_of(schema).
+      cs
+      |> apply_nested(gladius_schema.keys, atom_params)
+      |> apply_embed_types(gladius_schema.keys)
     end
 
     # -------------------------------------------------------------------------
     # Nested changeset application
     # -------------------------------------------------------------------------
 
-    # Iterate schema keys; for each field whose spec resolves to a nested
-    # %Schema{}, build a nested changeset and put it into the parent's changes.
-    # If the nested changeset is invalid, the parent is also marked invalid.
+    # Iterate schema keys; for each field whose spec resolves to a nested schema
+    # or list_of(schema), build nested changeset(s) and put into parent changes.
     defp apply_nested(cs, keys, atom_params) do
       Enum.reduce(keys, cs, fn %SchemaKey{name: name, spec: spec, required: required}, acc ->
-        case unwrap_to_schema(spec) do
-          nil ->
-            # Leaf field — already handled by cast above
+        raw = Map.get(atom_params, name)
+
+        cond do
+          # ── Single nested schema ───────────────────────────────────────────
+          match?(%Schema{}, unwrap_to_schema(spec)) and is_map(raw) and not is_struct(raw) ->
+            nested_schema = unwrap_to_schema(spec)
+            nested_cs     = changeset(nested_schema, raw)
+            acc
+            |> Ecto.Changeset.put_change(name, nested_cs)
+            |> invalidate_if(not nested_cs.valid?)
+
+          # ── list_of(schema) — many embed ───────────────────────────────────
+          unwrap_list_schema(spec) != nil and is_list(raw) ->
+            element_schema = unwrap_list_schema(spec)
+            nested_list    = Enum.map(raw, &changeset(element_schema, &1))
+            all_valid?     = Enum.all?(nested_list, & &1.valid?)
+            acc
+            |> Ecto.Changeset.put_change(name, nested_list)
+            |> invalidate_if(not all_valid?)
+
+          # ── list_of(schema) with empty list ────────────────────────────────
+          unwrap_list_schema(spec) != nil and raw == [] ->
+            Ecto.Changeset.put_change(acc, name, [])
+
+          # ── Required nested field absent — error already in top_errors ─────
+          required and is_nil(raw) ->
             acc
 
-          nested_schema ->
-            raw = Map.get(atom_params, name)
-
-            cond do
-              is_map(raw) and not is_struct(raw) ->
-                # Nested params provided — build a recursive changeset
-                nested_cs = changeset(nested_schema, raw)
-                acc
-                |> Ecto.Changeset.put_change(name, nested_cs)
-                |> invalidate_if(not nested_cs.valid?)
-
-              required and is_nil(raw) ->
-                # Required nested schema absent — the missing-key error from
-                # Gladius is already in top_errors; leave parent cs unchanged
-                acc
-
-              true ->
-                # Optional nested schema absent — nothing to do
-                acc
-            end
+          # ── Optional nested field absent — nothing to do ───────────────────
+          true ->
+            acc
         end
       end)
     end
@@ -194,25 +203,51 @@ defmodule Gladius.Ecto do
     defp invalidate_if(cs, false), do: cs
     defp invalidate_if(cs, true),  do: Map.put(cs, :valid?, false)
 
+    # After nested changesets are placed in changes, overwrite the types map
+    # so Phoenix's inputs_for/4 and Ecto.Changeset.traverse_errors/2 recognise
+    # them as embeds. This MUST run after cast/4 — cast doesn't handle embed types.
+    defp apply_embed_types(cs, keys) do
+      Enum.reduce(keys, cs, fn %SchemaKey{name: name, spec: spec}, acc ->
+        case embed_cardinality(spec) do
+          nil  -> acc
+          card -> %{acc | types: Map.put(acc.types, name, embed_type(card, name))}
+        end
+      end)
+    end
+
     # -------------------------------------------------------------------------
     # Schema unwrapping
     # -------------------------------------------------------------------------
 
-    # Peels off Default, Transform, Maybe, and Ref wrappers to find a nested
-    # %Schema{}, returning nil if the spec is not (and does not wrap) a schema.
-    defp unwrap_to_schema(%Schema{} = s),          do: s
-    defp unwrap_to_schema(%Default{spec: inner}),  do: unwrap_to_schema(inner)
+    # Returns the nested %Schema{} if the spec is (or wraps) one; nil otherwise.
+    defp unwrap_to_schema(%Schema{} = s),           do: s
+    defp unwrap_to_schema(%Default{spec: inner}),   do: unwrap_to_schema(inner)
     defp unwrap_to_schema(%Transform{spec: inner}), do: unwrap_to_schema(inner)
-    defp unwrap_to_schema(%Maybe{spec: inner}),    do: unwrap_to_schema(inner)
-    defp unwrap_to_schema(%Validate{spec: inner}), do: unwrap_to_schema(inner)
+    defp unwrap_to_schema(%Maybe{spec: inner}),     do: unwrap_to_schema(inner)
+    defp unwrap_to_schema(%Validate{spec: inner}),  do: unwrap_to_schema(inner)
 
-    defp unwrap_to_schema(%Ref{name: name}) do
-      unwrap_to_schema(Gladius.Registry.fetch!(name))
+    defp unwrap_to_schema(%Ref{name: n}) do
+      unwrap_to_schema(Gladius.Registry.fetch!(n))
     rescue
       _ -> nil
     end
 
     defp unwrap_to_schema(_), do: nil
+
+    # Returns the element %Schema{} if the spec is list_of(schema); nil otherwise.
+    defp unwrap_list_schema(%ListOf{element_spec: el}),  do: unwrap_to_schema(el)
+    defp unwrap_list_schema(%Default{spec: inner}),      do: unwrap_list_schema(inner)
+    defp unwrap_list_schema(%Transform{spec: inner}),    do: unwrap_list_schema(inner)
+    defp unwrap_list_schema(%Maybe{spec: inner}),        do: unwrap_list_schema(inner)
+    defp unwrap_list_schema(%Validate{spec: inner}),     do: unwrap_list_schema(inner)
+
+    defp unwrap_list_schema(%Ref{name: n}) do
+      unwrap_list_schema(Gladius.Registry.fetch!(n))
+    rescue
+      _ -> nil
+    end
+
+    defp unwrap_list_schema(_), do: nil
 
     # -------------------------------------------------------------------------
     # Type inference
@@ -220,45 +255,76 @@ defmodule Gladius.Ecto do
 
     defp infer_types(%Schema{keys: keys}) do
       Map.new(keys, fn %SchemaKey{name: name, spec: spec} ->
-        {name, infer_ecto_type(spec)}
+        {name, infer_ecto_type(spec, name)}
       end)
     end
 
-    defp infer_ecto_type(%Spec{type: :string}),  do: :string
-    defp infer_ecto_type(%Spec{type: :integer}), do: :integer
-    defp infer_ecto_type(%Spec{type: :float}),   do: :float
-    defp infer_ecto_type(%Spec{type: :number}),  do: :float
-    defp infer_ecto_type(%Spec{type: :boolean}), do: :boolean
-    defp infer_ecto_type(%Spec{type: :map}),     do: :map
-    defp infer_ecto_type(%Spec{type: :atom}),    do: :any
-    defp infer_ecto_type(%Spec{type: :any}),     do: :any
-    defp infer_ecto_type(%Spec{type: :null}),    do: :any
-    defp infer_ecto_type(%Spec{type: :list}),    do: {:array, :any}
-    defp infer_ecto_type(%Spec{type: nil}),      do: :any
+    # infer_ecto_type/2 — always returns a primitive Ecto type safe for cast/4.
+    # Embed types ({:parameterized, Ecto.Embedded, ...}) are injected AFTER
+    # casting via apply_embed_types/2, not during cast — Ecto.Type.cast_fun/1
+    # does not handle embed types and raises FunctionClauseError if passed one.
+    defp infer_ecto_type(spec, _field_name), do: infer_scalar_type(spec)
 
-    defp infer_ecto_type(%Default{spec: inner}),   do: infer_ecto_type(inner)
-    defp infer_ecto_type(%Transform{spec: inner}), do: infer_ecto_type(inner)
-    defp infer_ecto_type(%Maybe{spec: inner}),     do: infer_ecto_type(inner)
+    # Determine if a spec resolves to a nested schema (returning embed cardinality)
+    defp embed_cardinality(%Schema{}),             do: :one
+    defp embed_cardinality(%Default{spec: s}),     do: embed_cardinality(s)
+    defp embed_cardinality(%Transform{spec: s}),   do: embed_cardinality(s)
+    defp embed_cardinality(%Maybe{spec: s}),       do: embed_cardinality(s)
+    defp embed_cardinality(%Validate{spec: s}),    do: embed_cardinality(s)
+    defp embed_cardinality(%ListOf{element_spec: el}) do
+      if embed_cardinality(el) != nil, do: :many, else: nil
+    end
+    defp embed_cardinality(%Ref{name: n}) do
+      embed_cardinality(Gladius.Registry.fetch!(n))
+    rescue
+      _ -> nil
+    end
+    defp embed_cardinality(_), do: nil
 
-    defp infer_ecto_type(%All{specs: [first | _]}), do: infer_ecto_type(first)
-    defp infer_ecto_type(%All{specs: []}),           do: :any
-    defp infer_ecto_type(%Any{}),                    do: :any
+    # Build a parameterized Ecto.Embedded type for inputs_for compatibility
+    defp embed_type(cardinality, field) do
+      {:parameterized, Ecto.Embedded, %Ecto.Embedded{
+        cardinality: cardinality,
+        field:       field,
+        owner:       nil,
+        related:     nil,
+        on_cast:     nil,
+        on_replace:  :raise,
+        unique:      true,
+        ordered:     true
+      }}
+    end
 
-    defp infer_ecto_type(%Ref{name: name}) do
-      infer_ecto_type(Gladius.Registry.fetch!(name))
+    # Primitive / scalar type inference (non-embed fields)
+    defp infer_scalar_type(%Spec{type: :string}),  do: :string
+    defp infer_scalar_type(%Spec{type: :integer}), do: :integer
+    defp infer_scalar_type(%Spec{type: :float}),   do: :float
+    defp infer_scalar_type(%Spec{type: :number}),  do: :float
+    defp infer_scalar_type(%Spec{type: :boolean}), do: :boolean
+    defp infer_scalar_type(%Spec{type: :map}),     do: :map
+    defp infer_scalar_type(%Spec{type: :atom}),    do: :any
+    defp infer_scalar_type(%Spec{type: :any}),     do: :any
+    defp infer_scalar_type(%Spec{type: :null}),    do: :any
+    defp infer_scalar_type(%Spec{type: :list}),    do: {:array, :any}
+    defp infer_scalar_type(%Spec{type: nil}),      do: :any
+
+    defp infer_scalar_type(%Default{spec: inner}),   do: infer_scalar_type(inner)
+    defp infer_scalar_type(%Transform{spec: inner}), do: infer_scalar_type(inner)
+    defp infer_scalar_type(%Maybe{spec: inner}),     do: infer_scalar_type(inner)
+
+    defp infer_scalar_type(%All{specs: [first | _]}), do: infer_scalar_type(first)
+    defp infer_scalar_type(%All{specs: []}),           do: :any
+    defp infer_scalar_type(%Any{}),                    do: :any
+
+    defp infer_scalar_type(%Ref{name: n}) do
+      infer_scalar_type(Gladius.Registry.fetch!(n))
     rescue
       _ -> :any
     end
 
-    defp infer_ecto_type(%Gladius.ListOf{element_spec: el}) do
-      {:array, infer_ecto_type(el)}
-    end
-
-    # Nested schemas — use :map so Ecto's cast accepts the raw nested map.
-    # apply_nested/3 will overwrite this with a proper nested changeset.
-    defp infer_ecto_type(%Schema{}), do: :map
-
-    defp infer_ecto_type(_), do: :any
+    defp infer_scalar_type(%ListOf{element_spec: el}), do: {:array, infer_scalar_type(el)}
+    defp infer_scalar_type(%Schema{}),                  do: :map
+    defp infer_scalar_type(_),                          do: :any
 
     # -------------------------------------------------------------------------
     # Error mapping
@@ -289,6 +355,9 @@ defmodule Gladius.Ecto do
           {k, atomize_keys(v)}
       end)
     end
+
+    # Recurse into lists so nested params like [%{"name" => "x"}] get atomized
+    defp atomize_keys(list) when is_list(list), do: Enum.map(list, &atomize_keys/1)
 
     defp atomize_keys(other), do: other
 
@@ -339,11 +408,21 @@ defmodule Gladius.Ecto do
         case value do
           %Ecto.Changeset{} = nested ->
             nested_errors = traverse_errors(nested, msg_func)
-            if nested_errors == %{} do
+            if nested_errors == %{}, do: acc, else: Map.put(acc, field, nested_errors)
+
+          list when is_list(list) ->
+            cs_list = Enum.filter(list, &is_struct(&1, Ecto.Changeset))
+            if cs_list == [] do
               acc
             else
-              Map.put(acc, field, nested_errors)
+              errors_list = Enum.map(cs_list, &traverse_errors(&1, msg_func))
+              if Enum.all?(errors_list, &(&1 == %{})) do
+                acc
+              else
+                Map.put(acc, field, errors_list)
+              end
             end
+
           _ ->
             acc
         end
