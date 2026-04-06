@@ -181,20 +181,38 @@ defmodule Inspex.Signature do
   # ---------------------------------------------------------------------------
 
   @doc false
+  # Validates and coerces all args against their specs. Returns coerced arg list.
+  #
+  # Key improvements over naive per-arg early-raise:
+  # 1. All arg failures are collected — not just the first one.
+  # 2. Each error path is prefixed with {:arg, idx} so the caller knows which
+  #    argument failed AND which nested field within it.
+  # 3. Coercion results from passing args are still threaded to the impl correctly.
   def __coerce_and_check_args__(args, args_specs, module, function, arity)
       when is_list(args_specs) do
-    args
-    |> Enum.zip(args_specs)
-    |> Enum.with_index()
-    |> Enum.map(fn {{arg, spec}, idx} ->
-      case Inspex.conform(spec, arg) do
-        {:ok, coerced}   -> coerced
-        {:error, errors} ->
-          raise Inspex.SignatureError,
-            module: module, function: function, arity: arity,
-            kind: :args, arg_index: idx, value: arg, errors: errors
-      end
+    results =
+      args
+      |> Enum.zip(args_specs)
+      |> Enum.with_index()
+      |> Enum.map(fn {{arg, spec}, idx} ->
+        case Inspex.conform(spec, arg) do
+          {:ok, coerced}   -> {:ok, coerced}
+          {:error, errors} -> {:error, prefix_paths(errors, {:arg, idx})}
+        end
+      end)
+
+    all_errors = Enum.flat_map(results, fn
+      {:ok, _}     -> []
+      {:error, es} -> es
     end)
+
+    if all_errors == [] do
+      Enum.map(results, fn {:ok, v} -> v end)
+    else
+      raise Inspex.SignatureError,
+        module: module, function: function, arity: arity,
+        kind: :args, errors: all_errors
+    end
   end
 
   @doc false
@@ -204,7 +222,7 @@ defmodule Inspex.Signature do
       {:error, errors} ->
         raise Inspex.SignatureError,
           module: module, function: function, arity: arity,
-          kind: :ret, value: result, errors: errors
+          kind: :ret, errors: prefix_paths(errors, :ret)
     end
   end
 
@@ -215,7 +233,11 @@ defmodule Inspex.Signature do
       {:error, errors} ->
         raise Inspex.SignatureError,
           module: module, function: function, arity: arity,
-          kind: :fn, errors: errors
+          kind: :fn, errors: prefix_paths(errors, :fn)
     end
+  end
+
+  defp prefix_paths(errors, prefix) do
+    Enum.map(errors, fn err -> %{err | path: [prefix | err.path]} end)
   end
 end

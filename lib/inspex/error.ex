@@ -49,8 +49,9 @@ defmodule Inspex.Error do
       formatted =
         path
         |> Enum.map(fn
-          key when is_atom(key) -> inspect(key)
+          key when is_atom(key)    -> inspect(key)
           idx when is_integer(idx) -> "[#{idx}]"
+          other                    -> inspect(other)
         end)
         |> Enum.join(".")
 

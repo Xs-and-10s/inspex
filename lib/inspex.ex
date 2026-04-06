@@ -83,34 +83,28 @@ defmodule Inspex do
 
   ## Supported forms
 
-      # Norm-style guard + predicate composition (most ergonomic):
-      spec(is_integer() and &(&1 > 0))
+      spec(is_integer() and &(&1 > 0))             # guard + capture (most ergonomic)
       spec(is_binary() and &(byte_size(&1) > 3))
-
-      # Explicit function capture:
-      spec(&is_integer/1)
+      spec(&is_integer/1)                           # explicit capture
       spec(&(&1 > 0))
+      spec(fn x -> rem(x, 2) == 0 end)             # anonymous function
+      spec(is_integer() and &(&1 > 0) and &(rem(&1, 2) == 0))  # chained
 
-      # Anonymous function:
-      spec(fn x -> is_integer(x) and rem(x, 2) == 0 end)
+  ## Supplying a generator
 
-      # `and`-chaining of any of the above:
-      spec(is_integer() and &(&1 > 0) and &(rem(&1, 2) == 0))
+  Predicate specs are opaque to the generator — it cannot reverse an arbitrary
+  function into a data source. Provide an explicit generator with the `:gen` option:
 
-  ## On generators (Step 4)
+      even = spec(fn x -> rem(x, 2) == 0 end,
+                  gen: StreamData.filter(StreamData.integer(), &(rem(&1, 2) == 0)))
 
-  Predicate specs are opaque to the generator — it cannot infer what data
-  would satisfy an arbitrary function. In Step 4, supply a generator explicitly:
-
-      spec(fn x -> rem(x, 2) == 0 end, gen: StreamData.integer() |> StreamData.filter(&(rem(&1,2)==0)))
-
-  For now, the `:gen` option is accepted but ignored.
+      Inspex.gen(even)   # uses the explicit generator
 
   ## Prefer typed builders when possible
 
   `integer(gt?: 0)` is equivalent to `spec(is_integer() and &(&1 > 0))` for
-  conforming, but the typed form carries named constraint metadata that the
-  generator can use without a manual hint.
+  validation, but the typed form carries named constraint metadata so generators
+  are inferred automatically without a `:gen` hint.
   """
   defmacro spec(expr, opts \\ []) do
     source  = Macro.to_string(expr)
@@ -646,13 +640,27 @@ defmodule Inspex do
   defdelegate gen(spec), to: Inspex.Gen
 
   @doc """
-  Validates `value` against `spec`.
+  Validates `value` against `spec`. Returns `{:ok, shaped_value}` on success,
+  or `{:error, [%Inspex.Error{}]}` with every failure — no short-circuiting.
 
-  Returns `{:ok, shaped_value}` on success, or `{:error, [%Inspex.Error{}]}`
-  with a complete list of all failures.
+  The shaped value may differ from the raw input when specs include coercions
+  (`coerce/2`). The coerced value is what downstream constraints and the
+  caller both receive.
 
-  The shaped value may differ from the input once coercions (Step 3) are
-  introduced. For now it is always the original value unchanged.
+  ## Examples
+
+      iex> import Inspex
+      iex> conform(string(:filled?), "hello")
+      {:ok, "hello"}
+
+      iex> conform(string(:filled?), "")
+      {:error, [%Inspex.Error{predicate: :filled?, message: "must be filled"}]}
+
+      iex> conform(coerce(integer(), from: :string), "42")
+      {:ok, 42}
+
+      iex> conform(schema(%{required(:age) => integer(gte?: 18)}), %{age: 15})
+      {:error, [%Inspex.Error{path: [:age], message: "must be >= 18"}]}
   """
   @spec conform(conformable(), term()) :: conform_result()
 
@@ -908,16 +916,36 @@ defmodule Inspex do
   @doc """
   Returns `true` if `value` conforms to `spec`, `false` otherwise.
 
-  Does not produce error details — use `explain/2` for diagnostics.
+  Equivalent to `match?({:ok, _}, conform(spec, value))`. Does not produce
+  error details — use `conform/2` for the shaped value, `explain/2` for a
+  human-readable error summary.
+
+  ## Examples
+
+      iex> import Inspex
+      iex> valid?(integer(gte?: 0), 42)
+      true
+      iex> valid?(integer(gte?: 0), -1)
+      false
   """
   @spec valid?(conformable(), term()) :: boolean()
   def valid?(spec, value), do: match?({:ok, _}, conform(spec, value))
 
   @doc """
   Returns a `%Inspex.ExplainResult{}` with structured errors and a
-  pre-formatted string for display.
+  pre-formatted string ready for display or logging.
 
-  For just the `{:ok, val} | {:error, errors}` tuple, use `conform/2`.
+  For the raw `{:ok, val} | {:error, errors}` result, use `conform/2`.
+  For a simple boolean check, use `valid?/2`.
+
+  ## Example
+
+      iex> import Inspex
+      iex> result = explain(schema(%{required(:age) => integer(gte?: 18)}), %{age: 15})
+      iex> result.valid?
+      false
+      iex> IO.puts(result.formatted)
+      :age: must be >= 18
   """
   @spec explain(conformable(), term()) :: ExplainResult.t()
   def explain(spec, value) do
@@ -986,6 +1014,7 @@ defmodule Inspex do
   Empty list means lossless. See `Inspex.Typespec` for full docs.
   """
   defdelegate typespec_lossiness(spec), to: Inspex.Typespec, as: :lossiness
+
   defp prepend_path(errors, key) do
     Enum.map(errors, fn err -> %{err | path: [key | err.path]} end)
   end

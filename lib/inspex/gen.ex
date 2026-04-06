@@ -67,10 +67,7 @@ defmodule Inspex.Gen do
       end
   """
   @spec gen(Inspex.conformable()) :: term()
-
-  # --- Spec (leaf) -----------------------------------------------------------
-
-  # Explicit generator override — always wins
+  @doc false
   def gen(%Spec{generator: g}) when not is_nil(g), do: g
 
   def gen(%Spec{type: :any}),     do: StreamData.one_of([

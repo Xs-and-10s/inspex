@@ -1,41 +1,5 @@
 defmodule Inspex.Constraints do
-  @moduledoc """
-  Evaluates a keyword list of named constraints against a value that has
-  already passed its type check.
-
-  Named constraints are the key difference between `string(:filled?)` and
-  `spec(fn s -> s != "" end)`: the named form is introspectable by the
-  generator in Step 4, enabling automatic test data production.
-
-  ## Constraint catalogue
-
-  ### Universal
-  - `:filled?` — value must be non-empty (string, list, or map) and non-nil
-
-  ### Numeric (`integer`, `float`, `number`)
-  - `gt?: n`  — value > n
-  - `gte?: n` — value >= n
-  - `lt?: n`  — value < n
-  - `lte?: n` — value <= n
-
-  ### Strings
-  - `min_length: n` — byte_size >= n
-  - `max_length: n` — byte_size <= n
-  - `format: ~r/regex/` — must match regex
-
-  ### Collections (strings and lists)
-  - `size?: n` — exactly n characters / elements
-
-  ### Enumerations
-  - `in?: [values]` — value must be a member of the list
-
-  ## Extensibility
-
-  Unknown constraints are silently ignored so user-defined constraint
-  *names* can be layered on top without forking the library. In Step 4,
-  custom constraint → generator mappings will be registerable via
-  `Inspex.Constraints.register_generator/2`.
-  """
+  @moduledoc false
 
   alias Inspex.Error
 

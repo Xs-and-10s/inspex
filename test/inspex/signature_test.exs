@@ -15,7 +15,6 @@ defmodule Inspex.SignatureTest do
   # ---------------------------------------------------------------------------
   defmodule BasicSubject do
     use Inspex.Signature
-    import Inspex
 
     signature args: [string(:filled?), integer(gte?: 0)],
               ret:  string(:filled?)
@@ -38,27 +37,45 @@ defmodule Inspex.SignatureTest do
       end
     end
 
-    test "error reports the correct argument index" do
+    test "error reports the correct argument index via error path" do
       try do
         BasicSubject.greet("Mark", -1)   # -1 fails integer(gte?: 0)
       rescue
         e in Inspex.SignatureError ->
           assert e.kind == :args
-          assert e.arg_index == 1
-          assert e.value == -1
           assert e.function == :greet
           assert e.arity == 2
+          # Path starts with {:arg, 1} — the second argument
+          assert Enum.any?(e.errors, fn err ->
+            match?([{:arg, 1} | _], err.path)
+          end)
       end
     end
 
-    test "wrong type for first arg" do
+    test "wrong type for first arg — path is {:arg, 0}" do
       try do
         BasicSubject.greet(42, 1)
       rescue
         e in Inspex.SignatureError ->
           assert e.kind == :args
-          assert e.arg_index == 0
-          assert e.value == 42
+          assert Enum.any?(e.errors, fn err ->
+            match?([{:arg, 0} | _], err.path)
+          end)
+      end
+    end
+
+    test "errors from multiple failing args are accumulated" do
+      try do
+        BasicSubject.greet(42, -1)   # arg[0] wrong type, arg[1] fails gte?: 0
+      rescue
+        e in Inspex.SignatureError ->
+          assert e.kind == :args
+          indices =
+            e.errors
+            |> Enum.map(fn %{path: [{:arg, idx} | _]} -> idx end)
+            |> Enum.uniq()
+          assert 0 in indices
+          assert 1 in indices
       end
     end
 
@@ -69,14 +86,16 @@ defmodule Inspex.SignatureTest do
       end
     end
 
-    test "ret error reports the offending value" do
+    test "ret error path starts with :ret" do
       try do
         BasicSubject.greet("Mark", 0)
       rescue
         e in Inspex.SignatureError ->
           assert e.kind == :ret
-          assert e.value == ""
           assert e.function == :greet
+          assert Enum.any?(e.errors, fn err ->
+            match?([:ret | _], err.path)
+          end)
       end
     end
 
@@ -90,7 +109,6 @@ defmodule Inspex.SignatureTest do
   # ---------------------------------------------------------------------------
   defmodule MultiClause do
     use Inspex.Signature
-    import Inspex
 
     signature args: [integer()], ret: integer()
     def fact(0), do: 1
@@ -118,13 +136,12 @@ defmodule Inspex.SignatureTest do
   # ---------------------------------------------------------------------------
   defmodule ZeroArity do
     use Inspex.Signature
-    import Inspex
 
     signature ret: string(:filled?)
     def config_key, do: "my_key"
 
     signature ret: string(:filled?)
-    def bad_key, do: ""    # always violates ret
+    def bad_key, do: ""
   end
 
   describe "zero-arity function" do
@@ -144,10 +161,7 @@ defmodule Inspex.SignatureTest do
   # ---------------------------------------------------------------------------
   defmodule WithFnConstraint do
     use Inspex.Signature
-    import Inspex
 
-    # :fn spec receives a tuple {args_list, return_value} and must conform to it.
-    # Here: the return value must be >= the first argument.
     signature args: [integer(), integer()],
               ret:  integer(),
               fn:   spec(fn {[a, _b], ret} -> ret >= a end)
@@ -156,26 +170,21 @@ defmodule Inspex.SignatureTest do
 
   describe ":fn relationship constraint" do
     test "valid relationship passes through" do
-      assert WithFnConstraint.add(3, 4) == 7   # 7 >= 3 ✓
+      assert WithFnConstraint.add(3, 4) == 7
     end
 
     test ":fn violation raises SignatureError with :fn kind" do
-      # We can't easily make add/2 violate the fn constraint legitimately,
-      # so we test the constraint check directly via a module where the
-      # implementation can be made to violate it.
       defmodule FnViolator do
         use Inspex.Signature
-        import Inspex
 
-        # Return must equal first arg (trivially checkable)
         signature args: [integer()],
                   ret:  integer(),
                   fn:   spec(fn {[a], ret} -> ret == a end)
-        def identity(_n), do: 99   # always returns 99, violates fn unless arg is 99
+        def identity(_n), do: 99
       end
 
       assert_raise Inspex.SignatureError, fn ->
-        FnViolator.identity(1)   # returns 99, but 99 != 1
+        FnViolator.identity(1)
       end
 
       try do
@@ -191,11 +200,7 @@ defmodule Inspex.SignatureTest do
   # ---------------------------------------------------------------------------
   defmodule WithRef do
     use Inspex.Signature
-    import Inspex
 
-    # Registers a spec that this module's signature will reference.
-    # We set it up in test setup rather than at module level to avoid
-    # polluting the global registry.
     signature args: [ref(:sig_test_email)],
               ret:  boolean()
     def valid_email?(email), do: String.contains?(email, "@")
@@ -223,7 +228,6 @@ defmodule Inspex.SignatureTest do
   # ---------------------------------------------------------------------------
   defmodule WithCoercion do
     use Inspex.Signature
-    import Inspex
 
     signature args: [coerce(integer(gte?: 0), from: :string)],
               ret:  string(:filled?)
@@ -231,7 +235,8 @@ defmodule Inspex.SignatureTest do
   end
 
   describe "coercion in signature args" do
-    test "string arg is coerced to integer before validation" do
+    test "string arg is coerced to integer before the impl is called" do
+      # Coercion converts "5" → 5; the impl receives 5, not "5"
       assert WithCoercion.times_two("5") == "10"
     end
 
@@ -250,7 +255,7 @@ defmodule Inspex.SignatureTest do
   # SignatureError message formatting
   # ---------------------------------------------------------------------------
   describe "SignatureError message" do
-    test ":args error message is descriptive" do
+    test ":args error message includes argument path" do
       try do
         BasicSubject.greet(42, 1)
       rescue
@@ -259,19 +264,62 @@ defmodule Inspex.SignatureTest do
           assert msg =~ "Inspex.SignatureTest.BasicSubject"
           assert msg =~ "greet/2"
           assert msg =~ "argument[0]"
-          assert msg =~ inspect(42)
       end
     end
 
-    test ":ret error message is descriptive" do
+    test ":ret error message includes return path" do
       try do
         BasicSubject.greet("Mark", 0)
       rescue
         e in Inspex.SignatureError ->
           msg = Exception.message(e)
           assert msg =~ "greet/2"
-          assert msg =~ "return value"
+          assert msg =~ "return"
       end
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Path threading — schema args expose nested field paths
+  # ---------------------------------------------------------------------------
+  defmodule WithSchemaArg do
+    use Inspex.Signature
+    import Inspex
+
+    signature args: [schema(%{
+                required(:name)  => string(:filled?),
+                required(:email) => string(:filled?, format: ~r/@/)
+              })],
+              ret: boolean()
+    def validate(params), do: map_size(params) > 0
+  end
+
+  describe "path threading through schema args" do
+    test "nested field paths are prefixed with {:arg, 0}" do
+      try do
+        WithSchemaArg.validate(%{name: "", email: "not-an-email"})
+      rescue
+        e in Inspex.SignatureError ->
+          assert e.kind == :args
+          paths = Enum.map(e.errors, & &1.path)
+          assert [{:arg, 0}, :name] in paths
+          assert [{:arg, 0}, :email] in paths
+      end
+    end
+
+    test "error message renders nested paths as argument[0][:field]" do
+      try do
+        WithSchemaArg.validate(%{name: "", email: "not-an-email"})
+      rescue
+        e in Inspex.SignatureError ->
+          msg = Exception.message(e)
+          assert msg =~ "argument[0][:name]"
+          assert msg =~ "argument[0][:email]"
+      end
+    end
+
+    test "valid schema arg passes through" do
+      assert WithSchemaArg.validate(%{name: "Mark", email: "mark@example.com"}) == true
     end
   end
 
@@ -280,7 +328,6 @@ defmodule Inspex.SignatureTest do
   # ---------------------------------------------------------------------------
   defmodule WithPrivate do
     use Inspex.Signature
-    import Inspex
 
     signature args: [integer()], ret: integer()
     def double(n), do: helper(n)
