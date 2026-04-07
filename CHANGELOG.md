@@ -7,6 +7,82 @@ Gladius adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.6.0] — Unreleased
+
+### Added
+
+#### Ordered schema construction — list input for `schema/1` and `open_schema/1`
+
+`schema/1` and `open_schema/1` now accept a list of `{schema_key, conformable()}`
+2-tuples in addition to a map. List input preserves declaration order; map input
+does not guarantee order (Elixir map literals are unordered).
+
+```elixir
+# Map — field order is NOT guaranteed
+schema(%{
+  required(:name)  => string(:filled?),
+  required(:email) => string(:filled?),
+  required(:age)   => integer(gte?: 0)
+})
+
+# List — field order IS preserved
+schema([
+  {required(:name),  string(:filled?)},
+  {required(:email), string(:filled?)},
+  {required(:age),   integer(gte?: 0)}
+])
+```
+
+Both forms return an identical `%Gladius.Schema{}` — all existing functions
+(`conform/2`, `extend/2`, `selection/2`, `validate/2`, `Gladius.Schema.fields/1`,
+`Gladius.Ecto.changeset/2`, and `Gladius.Schema.to_json_schema/2`) work
+identically on both. Fully backward compatible — existing map-based schemas
+require no changes.
+
+Use list input when field order matters: form field rendering, JSON Schema
+`"required"` array order, admin UI column order, API documentation.
+
+#### JSON Schema export — `Gladius.Schema.to_json_schema/2`
+
+New `Gladius.Schema.to_json_schema/2` converts any Gladius spec or schema
+to a JSON Schema (draft 2020-12) map. Accepts any conformable wrapping a
+`%Gladius.Schema{}`, or any primitive spec.
+
+```elixir
+Gladius.Schema.to_json_schema(user_schema, title: "User")
+#=> %{
+#=>   "$schema"  => "https://json-schema.org/draft/2020-12/schema",
+#=>   "title"    => "User",
+#=>   "type"     => "object",
+#=>   "properties" => %{ ... },
+#=>   "required"             => ["name", "age"],
+#=>   "additionalProperties" => false
+#=> }
+```
+
+Options: `:title`, `:description`, `:schema_header` (default: `true`).
+
+**Spec mapping highlights:**
+- String constraints → `minLength`, `maxLength`, `pattern`
+- Integer/float constraints → `minimum`, `exclusiveMinimum`, `maximum`, `exclusiveMaximum`
+- `atom(in?: [:a, :b])` → `{"enum": ["a", "b"]}` (atom values stringified)
+- `maybe(inner)` → `{"oneOf": [{"type": "null"}, inner]}`
+- `default(inner, val)` → inner schema + `"default": val`
+- `transform/2`, `coerce/2`, `validate/2` → transparent (inner spec emitted)
+- `spec(pred)` → `{"description": "custom predicate — no JSON Schema equivalent"}`
+- Nested schemas → inlined (no `$ref` / `$defs`)
+
+Output contains only JSON-safe values — pass directly to `Jason.encode!/1`.
+
+The new module `Gladius.JsonSchema` implements the conversion. `Gladius.Schema.to_json_schema/2` is the public entry point.
+
+### Changed
+
+- `schema/1` and `open_schema/1` — guard widened from `when is_map(key_map)` to
+  `when is_map(key_map) or is_list(key_map)`. Fully backward compatible.
+
+---
+
 ## [0.5.0] — Unreleased
 
 ### Added
@@ -515,6 +591,7 @@ First public release.
 
 ---
 
+[0.6.0]: https://github.com/Xs-and-10s/gladius/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Xs-and-10s/gladius/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Xs-and-10s/gladius/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Xs-and-10s/gladius/compare/v0.2.0...v0.3.0

@@ -252,4 +252,19 @@ defmodule Gladius.Schema do
             "expected a %Gladius.Schema{} or a conformable wrapping one, got: #{inspect(c)}"
       end
     end
+
+    @doc """
+      Converts the schema (or any conformable wrapping a schema) to a JSON Schema
+      (draft 2020-12) map.
+
+      ## Options
+
+        * `:title` - adds `"title"` to the root object
+        * `:description` - adds `"description"` to the root object
+        * `:schema_header` - include `"$schema"` URI (default: `true`)
+      """
+      @spec to_json_schema(term(), keyword()) :: map()
+      def to_json_schema(conformable, opts \\ []) do
+        Gladius.JsonSchema.convert(conformable, opts)
+      end
   end

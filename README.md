@@ -19,6 +19,8 @@
 - [Post-Validation Transforms](#post-validation-transforms)
 - [Struct Validation](#struct-validation)
 - [Custom Error Messages](#custom-error-messages)
+- [Ordered Schemas](#ordered-schemas)
+- [JSON Schema Export](#json-schema-export)
 - [Schema Extension](#schema-extension)
 - [Partial Schemas](#partial-schemas)
 - [Cross-Field Validation](#cross-field-validation)
@@ -39,7 +41,7 @@
 # mix.exs
 def deps do
   [
-    {:gladius, "~> 0.5"}
+    {:gladius, "~> 0.6"}
   ]
 end
 ```
@@ -268,9 +270,140 @@ defspec :tree_node, schema(%{
 
 ---
 
+## Ordered Schemas
+
+`schema/1` and `open_schema/1` accept either a map (`%{}`) or a list of
+2-tuples (`[]`). **Lists preserve declaration order** — use them when field
+order matters for introspection, JSON Schema export, or form rendering.
+
+```elixir
+# Map — field order is NOT guaranteed (Elixir map literals are unordered)
+schema(%{
+  required(:name)  => string(:filled?),
+  required(:email) => string(:filled?, format: ~r/@/),
+  required(:age)   => integer(gte?: 0)
+})
+
+# List — field order IS preserved
+schema([
+  {required(:name),  string(:filled?)},
+  {required(:email), string(:filled?, format: ~r/@/)},
+  {required(:age),   integer(gte?: 0)}
+])
+```
+
+The list form uses standard Elixir 2-tuple syntax. `{required(:field), spec}` and
+`{optional(:field), spec}` are the two forms. Bare atom keys `{:field, spec}` are
+treated as required.
+
+Both forms return an identical `%Gladius.Schema{}` — all other functions
+(`conform/2`, `extend/2`, `selection/2`, `validate/2`, `Gladius.Schema.fields/1`,
+`Gladius.Ecto.changeset/2`) work identically on both.
+
+When to use each:
+- **Map** — quick schemas where order is irrelevant (most validation use cases)
+- **List** — schemas that drive form field order, API documentation, or admin UIs
+
+---
+
+## JSON Schema Export
+
+`Gladius.Schema.to_json_schema/2` converts any Gladius spec or schema to a
+JSON Schema (draft 2020-12) map. Encode with Jason or Poison as normal.
+
+```elixir
+import Gladius
+
+address = schema([
+  {required(:street), string(:filled?)},
+  {required(:zip),    string(size?: 5, message: "must be exactly 5 characters")},
+  {optional(:city),   string()}
+])
+
+user = schema([
+  {required(:name),    string(:filled?)},
+  {required(:age),     integer(gte?: 18)},
+  {optional(:role),    atom(in?: [:admin, :user])},
+  {optional(:address), address}
+])
+
+Gladius.Schema.to_json_schema(user, title: "User")
+#=> %{
+#=>   "$schema"  => "https://json-schema.org/draft/2020-12/schema",
+#=>   "title"    => "User",
+#=>   "type"     => "object",
+#=>   "properties" => %{
+#=>     "name"    => %{"type" => "string", "minLength" => 1},
+#=>     "age"     => %{"type" => "integer", "minimum" => 18},
+#=>     "role"    => %{"enum" => ["admin", "user"]},
+#=>     "address" => %{
+#=>       "type" => "object",
+#=>       "properties" => %{
+#=>         "street" => %{"type" => "string", "minLength" => 1},
+#=>         "zip"    => %{"type" => "string", "minLength" => 5, "maxLength" => 5},
+#=>         "city"   => %{"type" => "string"}
+#=>       },
+#=>       "required"             => ["street", "zip"],
+#=>       "additionalProperties" => false
+#=>     }
+#=>   },
+#=>   "required"             => ["name", "age"],
+#=>   "additionalProperties" => false
+#=> }
+```
+
+### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `:title` | — | Adds `"title"` to the root object |
+| `:description` | — | Adds `"description"` to the root object |
+| `:schema_header` | `true` | Include `"$schema"` URI at root |
+
+### Spec → JSON Schema mapping
+
+| Gladius | JSON Schema |
+|---------|------------|
+| `string(:filled?)` | `{"type": "string", "minLength": 1}` |
+| `string(size?: 5)` | `{"type": "string", "minLength": 5, "maxLength": 5}` |
+| `string(format: ~r/re/)` | `{"type": "string", "pattern": "re"}` |
+| `integer(gte?: 0)` | `{"type": "integer", "minimum": 0}` |
+| `integer(gt?: 0)` | `{"type": "integer", "exclusiveMinimum": 0}` |
+| `integer(in?: [1,2])` | `{"enum": [1, 2]}` |
+| `float()` / `number()` | `{"type": "number"}` |
+| `boolean()` | `{"type": "boolean"}` |
+| `atom(in?: [:a, :b])` | `{"enum": ["a", "b"]}` |
+| `nil_spec()` | `{"type": "null"}` |
+| `any()` | `{}` |
+| `list_of(inner)` | `{"type": "array", "items": inner}` |
+| `maybe(inner)` | `{"oneOf": [{"type": "null"}, inner]}` |
+| `all_of([s1, s2])` | `{"allOf": [s1, s2]}` |
+| `any_of([s1, s2])` | `{"anyOf": [s1, s2]}` |
+| `not_spec(inner)` | `{"not": inner}` |
+| `default(inner, val)` | inner + `"default": val` |
+| `transform(inner, _)` | inner (transform is a runtime concern) |
+| `coerce(inner, _)` | inner (output type; coercion is a runtime concern) |
+| `validate(inner, _)` | inner (cross-field rules have no JSON Schema form) |
+| `schema(%{...})` | `{"type": "object", "properties": {...}, "required": [...], "additionalProperties": false}` |
+| `open_schema(%{...})` | same with `"additionalProperties": true` |
+| `spec(pred)` | `{"description": "custom predicate — no JSON Schema equivalent"}` |
+| `ref(:name)` | resolved and inlined |
+
+### Encoding with Jason
+
+```elixir
+Jason.encode!(Gladius.Schema.to_json_schema(user_schema, title: "User"))
+```
+
+The output contains only JSON-safe values (string keys, no atoms except
+`true`/`false`/`nil`) and can be passed directly to Jason without a custom
+encoder.
+
+---
+
 ## Schema Extension
 
-`extend/2` builds a new schema from an existing one, overriding or adding keys.
+`extend/2` builds a new schema from an existing one from an existing one, overriding or adding keys.
 Extension keys take precedence over same-named base keys. Base key order is
 preserved; new keys are appended after.
 
@@ -1113,6 +1246,8 @@ end
 | Ecto integration | ✓ | — | — | ✓ |
 | Ecto nested embeds (`inputs_for`) | ✓ | — | — | — |
 | Schema introspection (`fields/1`) | ✓ | — | — | — |
+| JSON Schema export | ✓ | — | — | — |
+| Ordered schema construction | ✓ | — | — | — |
 | Custom error messages | ✓ | — | — | — |
 | Schema extension (`extend`) | ✓ | — | — | — |
 | Partial schemas (`selection`) | ✓ | ✓ | — | — |
@@ -1389,6 +1524,8 @@ Gladius.Schema.optional_fields(conformable()) :: [field_descriptor()]
 Gladius.Schema.field_names(conformable())     :: [atom()]
 Gladius.Schema.schema?(conformable())         :: boolean()
 Gladius.Schema.open?(conformable())           :: boolean()
+Gladius.Schema.to_json_schema(conformable())  :: map()
+Gladius.Schema.to_json_schema(conformable(), title: string(), description: string(), schema_header: boolean()) :: map()
 ```
 
 All functions accept any conformable wrapping a `%Schema{}` — `validate/2`, `default/2`,
@@ -1448,3 +1585,5 @@ open?                         → inherited from base unless overridden via opts
 18. `Gladius.Ecto.changeset/2` auto-seeds `%{}` for single-schema embed fields and `[]` for `list_of(schema)` fields in `changeset.data`, so `inputs_for` never raises `KeyError`. `maybe(schema)` fields are not seeded — nil is a valid value.
 19. `Gladius.Ecto` automatically strips Phoenix LiveView bookkeeping keys (`_unused_*`, `_persistent_id`) from params before conforming. Application code does not need to clean params manually.
 20. `Gladius.Schema.fields/1` and related introspection functions return descriptors reflecting the declared schema — useful for admin UI generation, OpenAPI export, and dynamic form building.
+21. `schema/1` and `open_schema/1` accept a list of `{schema_key, conformable()}` 2-tuples in addition to a map. List input preserves declaration order; map input does not guarantee order.
+22. `Gladius.Schema.to_json_schema/2` output contains only JSON-safe values (string keys, no atoms except `true`/`false`/`nil`). Pass directly to `Jason.encode!/1` without a custom encoder. The `"$schema"` URI targets draft 2020-12.

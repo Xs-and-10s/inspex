@@ -663,14 +663,16 @@ defmodule Gladius do
       # same as: required(:name) => ..., required(:age) => ...
   """
   @spec schema(map()) :: Schema.t()
-  def schema(key_map) when is_map(key_map), do: build_schema(key_map, false)
+  def schema(key_map) when is_map(key_map) or is_list(key_map),
+    do: build_schema(key_map, false)
 
   @doc """
   Like `schema/1` but **open**: extra keys pass through unchanged in the
   shaped output.
   """
-  @spec open_schema(map()) :: Schema.t()
-  def open_schema(key_map) when is_map(key_map), do: build_schema(key_map, true)
+  @spec open_schema(map() | list()) :: Schema.t()
+  def open_schema(key_map) when is_map(key_map) or is_list(key_map),
+      do: build_schema(key_map, true)
 
   @doc """
   Returns a new schema containing only the named keys, all made optional.
@@ -823,6 +825,10 @@ defmodule Gladius do
   @spec optional(atom()) :: {:optional, atom()}
   def optional(name) when is_atom(name), do: {:optional, name}
 
+  # build_schema/2 accepts either a map or a list of 2-tuples.
+  # Maps: key order is NOT guaranteed (Elixir map literal ordering is undefined).
+  # Lists: key order IS preserved — use a list when declaration order matters
+  # (introspection, JSON Schema export, form rendering).
   defp build_schema(key_map, open?) do
     keys =
       Enum.map(key_map, fn
