@@ -39,7 +39,7 @@
 # mix.exs
 def deps do
   [
-    {:gladius, "~> 0.4"}
+    {:gladius, "~> 0.5"}
   ]
 end
 ```
@@ -667,7 +667,7 @@ cs = Gladius.Ecto.changeset(user_schema, params)
 
 # Nested changeset — Phoenix inputs_for reads this
 cs.changes.address         #=> %Ecto.Changeset{valid?: true, ...}
-cs.types[:address]         #=> {:parameterized, Ecto.Embedded, %Ecto.Embedded{cardinality: :one}}
+cs.types[:address]         #=> {:embed, %Ecto.Embedded{cardinality: :one, field: :address}}
 ```
 
 ### Lists of embedded schemas
@@ -683,8 +683,88 @@ schema(%{
 
 cs = Gladius.Ecto.changeset(s, params)
 cs.changes.tags   #=> [%Ecto.Changeset{}, %Ecto.Changeset{}, ...]
-cs.types[:tags]   #=> {:parameterized, Ecto.Embedded, %Ecto.Embedded{cardinality: :many}}
+cs.types[:tags]   #=> {:embed, %Ecto.Embedded{cardinality: :many, field: :tags}}
 ```
+
+### Phoenix LiveView — full working example
+
+```elixir
+defmodule MyAppWeb.UserFormLive do
+  use MyAppWeb, :live_view   # imports CoreComponents including input/1
+  import Gladius
+
+  # ⚠ Schemas must be functions, NOT module attributes.
+  # Coercions and transforms contain anonymous functions that Elixir cannot
+  # escape at compile time. Storing them in @attr raises ArgumentError.
+  defp address_schema do
+    schema(%{
+      required(:street) => string(:filled?),
+      required(:zip)    => string(size?: 5, message: "must be exactly 5 characters")
+    })
+  end
+
+  defp user_schema do
+    schema(%{
+      required(:name)    => transform(string(:filled?), &String.trim/1),
+      required(:email)   => transform(string(:filled?, format: ~r/@/), &String.downcase/1),
+      required(:age)     => coerce(integer(gte?: 18), from: :string, message: "must be a number"),
+      required(:address) => address_schema()
+    })
+  end
+
+  def mount(_params, _session, socket) do
+    # changeset/2 auto-seeds embed fields — no manual %{address: %{}} needed
+    form = Gladius.Ecto.changeset(user_schema(), %{}) |> to_form(as: :user)
+    {:ok, assign(socket, form: form)}
+  end
+
+  def handle_event("validate", %{"_target" => target, "user" => params}, socket) do
+    # Gladius.Ecto strips _unused_* and _persistent_id keys automatically
+    form =
+      Gladius.Ecto.changeset(user_schema(), params)
+      |> Map.put(:action, :validate)
+      |> to_form(as: :user)
+    {:noreply, assign(socket, form: form)}
+  end
+
+  def handle_event("submit", %{"user" => params}, socket) do
+    case Gladius.Ecto.changeset(user_schema(), params) do
+      %{valid?: true} = cs ->
+        shaped = Ecto.Changeset.apply_changes(cs)
+        {:noreply, assign(socket, form: cs |> to_form(as: :user), result: shaped)}
+      cs ->
+        {:noreply, assign(socket, form: cs |> Map.put(:action, :validate) |> to_form(as: :user))}
+    end
+  end
+
+  def render(assigns) do
+    ~H"""
+    <%!-- as={:user} is required — schemaless changesets have no struct name to derive from --%>
+    <.form for={@form} as={:user} phx-change="validate" phx-submit="submit">
+      <.input field={@form[:name]} type="text" />
+      <.input field={@form[:email]} type="email" />
+      <.input field={@form[:age]} type="text" />
+
+      <%!-- inputs_for works — embed type is declared automatically --%>
+      <.inputs_for :let={addr} field={@form[:address]}>
+        <.input field={addr[:street]} type="text" />
+        <.input field={addr[:zip]} type="text" />
+      </.inputs_for>
+
+      <button type="submit">Save</button>
+    </.form>
+    """
+  end
+end
+```
+
+**Required patterns for Phoenix LiveView:**
+
+1. **Schemas as functions** — never `@module_attr`. Coercions and transforms contain anonymous functions that cannot be escaped at compile time.
+2. **`as:` on the form** — `<.form for={@form} as={:user}>`. Schemaless changesets have no struct name; Phoenix cannot derive it automatically.
+3. **`to_form(changeset, as: :user)`** — store a `%Phoenix.HTML.Form{}` in assigns, not the raw changeset. The `input` component requires a form, not a changeset.
+4. **`_target`-based error filtering** — use the `_target` param from `phx-change` events to only show errors for the field the user just touched, avoiding premature full-form errors.
+5. **`Gladius.Ecto` strips Phoenix internals** — `_unused_*`, `_persistent_id`, and `_target` keys are removed automatically before conforming.
 
 ### Error traversal
 
@@ -1032,6 +1112,7 @@ end
 | Struct validation | ✓ | — | — | — |
 | Ecto integration | ✓ | — | — | ✓ |
 | Ecto nested embeds (`inputs_for`) | ✓ | — | — | — |
+| Schema introspection (`fields/1`) | ✓ | — | — | — |
 | Custom error messages | ✓ | — | — | — |
 | Schema extension (`extend`) | ✓ | — | — | — |
 | Partial schemas (`selection`) | ✓ | ✓ | — | — |
@@ -1060,6 +1141,7 @@ end
 | `Gladius.Error` | Validation failure struct |
 | `Gladius.SignatureError` | Raised on signature violation |
 | `Gladius.ConformError` | Raised by `defschema name!/1` |
+| `Gladius.Schema` | Runtime schema introspection — `fields/1`, `field_names/1`, etc. |
 | `Gladius.Translator` | Behaviour for plugging in a custom message translator |
 | `Gladius.Ecto` | Optional Ecto changeset integration |
 
@@ -1298,6 +1380,23 @@ Gladius.Coercions.registered()                    :: %{{atom, atom} => function(
 Gladius.Coercions.lookup(source, target)           :: function()
 ```
 
+### `Gladius.Schema` introspection API
+
+```elixir
+Gladius.Schema.fields(conformable())          :: [%{name: atom(), required: boolean(), spec: conformable()}]
+Gladius.Schema.required_fields(conformable()) :: [field_descriptor()]
+Gladius.Schema.optional_fields(conformable()) :: [field_descriptor()]
+Gladius.Schema.field_names(conformable())     :: [atom()]
+Gladius.Schema.schema?(conformable())         :: boolean()
+Gladius.Schema.open?(conformable())           :: boolean()
+```
+
+All functions accept any conformable wrapping a `%Schema{}` — `validate/2`, `default/2`,
+`transform/2`, `maybe/1`, and `ref/1` are all unwrapped transparently.
+Raises `ArgumentError` if no schema is found.
+Field order reflects the order keys were passed — note that Elixir map literals
+do not guarantee insertion order; use keyword-list style if order matters.
+
 ### `Gladius.Ecto` API
 
 ```elixir
@@ -1309,12 +1408,12 @@ Gladius.Ecto.changeset(Schema.t(), map(), map() | struct())  :: Ecto.Changeset.t
 Gladius.Ecto.traverse_errors(Ecto.Changeset.t(), (tuple() -> term())) :: map()
 ```
 
-**Nested changeset type declarations:**
-- `%Schema{}` field → `{:parameterized, Ecto.Embedded, %Ecto.Embedded{cardinality: :one}}`
-- `list_of(schema)` field → `{:parameterized, Ecto.Embedded, %Ecto.Embedded{cardinality: :many}}`
+**Nested changeset type declarations (injected after `cast/4`):**
+- `%Schema{}` field → `{:embed, %Ecto.Embedded{cardinality: :one, field: name}}`
+- `list_of(schema)` field → `{:embed, %Ecto.Embedded{cardinality: :many, field: name}}`
+- `maybe(schema)` field → not registered as embed; nil is a valid value
 
-These are injected *after* `Ecto.Changeset.cast/4` (which uses `:map`/`{:array, :map}` for safety),
-so Phoenix form helpers find the embed type at render time without `cast/4` raising.
+**Auto-seed:** `changeset/2` infers `%{}` / `[]` seeds for embed fields in `data` so `inputs_for` can find them without a `KeyError`. Pass an explicit base to `changeset/3` to override.
 
 ### `extend/2-3` semantics
 
@@ -1346,3 +1445,6 @@ open?                         → inherited from base unless overridden via opts
 15. `validate/2` rules run only when the inner spec fully passes. All rules run; errors accumulate. Exceptions in rules are caught and returned as `%Error{predicate: :validate}`. Multiple `validate/2` calls chain by appending to the same `%Validate{}` struct, not nesting.
 16. `Gladius.Ecto.traverse_errors/2` recursively collects errors from nested changesets. Use it instead of `Ecto.Changeset.traverse_errors/2` — Ecto's built-in only recurses into declared embed/assoc fields.
 17. `extend/2` never mutates the base schema — it always returns a new `%Schema{}`. Base key order is preserved; extension keys that override base keys stay at the base key's position; new extension keys are appended.
+18. `Gladius.Ecto.changeset/2` auto-seeds `%{}` for single-schema embed fields and `[]` for `list_of(schema)` fields in `changeset.data`, so `inputs_for` never raises `KeyError`. `maybe(schema)` fields are not seeded — nil is a valid value.
+19. `Gladius.Ecto` automatically strips Phoenix LiveView bookkeeping keys (`_unused_*`, `_persistent_id`) from params before conforming. Application code does not need to clean params manually.
+20. `Gladius.Schema.fields/1` and related introspection functions return descriptors reflecting the declared schema — useful for admin UI generation, OpenAPI export, and dynamic form building.

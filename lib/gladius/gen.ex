@@ -67,13 +67,12 @@ defmodule Gladius.Gen do
       end
   """
   @spec gen(Gladius.conformable()) :: term()
-  @doc false
   def gen(%Gladius.Validate{spec: inner_spec}), do: gen(inner_spec)
   def gen(%Gladius.Transform{spec: inner_spec}), do: gen(inner_spec)
   def gen(%Gladius.Default{spec: inner_spec}), do: gen(inner_spec)
   def gen(%Spec{generator: g}) when not is_nil(g), do: g
 
-  def gen(%Spec{type: :any}),     do: StreamData.one_of([
+  def gen(%Spec{type: :any}), do: StreamData.one_of([
     StreamData.integer(),
     StreamData.string(:printable),
     StreamData.boolean(),
@@ -109,19 +108,11 @@ defmodule Gladius.Gen do
 
   # --- Combinators -----------------------------------------------------------
 
-  # All (AND) — generate from the first spec, filter by the rest.
-  # The first spec sets the type domain; subsequent specs narrow it.
-  # Prefer putting the most selective typed spec first for efficiency.
   def gen(%All{specs: []}) do
     StreamData.term()
   end
 
   def gen(%All{specs: [head | tail]}) do
-    # Optimisation: collect typed %Spec{} constraints from the tail that share
-    # the same type as the head, and merge them into the base generator.
-    # This avoids pathological filter rejection rates like:
-    #   all_of([integer(gte?: 1), integer(lte?: 100)])
-    # which without merging would generate up to 1,000,000 and filter to 1..100.
     {mergeable, rest} =
       case head do
         %Gladius.Spec{type: type, predicate: nil} when not is_nil(type) ->
@@ -148,7 +139,6 @@ defmodule Gladius.Gen do
     end
   end
 
-  # Any (OR) — weighted uniform choice over each spec's generator.
   def gen(%Any{specs: []}) do
     raise Gladius.GeneratorError, spec: "any_of([])"
   end
@@ -157,30 +147,25 @@ defmodule Gladius.Gen do
     specs |> Enum.map(&gen/1) |> StreamData.one_of()
   end
 
-  # Not — cannot infer without a base type to generate from.
   def gen(%Not{}) do
     raise Gladius.GeneratorError,
       spec: "not_spec/1 — no base type to generate from. " <>
             "Wrap in all_of([typed_spec, not_spec(...)]) to give the generator a domain."
   end
 
-  # Maybe — nil or the inner spec's generator, with equal weight.
   def gen(%Maybe{spec: inner}) do
     StreamData.one_of([StreamData.constant(nil), gen(inner)])
   end
 
-  # Ref — resolve from registry at gen-time, then infer.
   def gen(%Ref{name: name}) do
     spec = Gladius.Registry.fetch!(name)
     gen(spec)
   end
 
-  # ListOf — list of generated elements, bounded to avoid huge test data.
   def gen(%ListOf{element_spec: el_spec}) do
     StreamData.list_of(gen(el_spec), max_length: 20)
   end
 
-  # Cond — cannot infer; the predicate splits based on runtime data.
   def gen(%Cond{}) do
     raise Gladius.GeneratorError,
       spec: "cond_spec/3 — branching depends on runtime values. " <>
@@ -188,7 +173,6 @@ defmodule Gladius.Gen do
             "or provide an explicit generator."
   end
 
-  # Schema — fixed_map for required keys; optional keys are coin-flipped in.
   def gen(%Schema{keys: key_specs}) do
     {required, optional} = Enum.split_with(key_specs, & &1.required)
 
@@ -201,7 +185,6 @@ defmodule Gladius.Gen do
     if optional == [] do
       required_gen
     else
-      # Each optional key: include with 50% probability
       optional_slot_gens =
         Enum.map(optional, fn %SchemaKey{name: name, spec: spec} ->
           StreamData.one_of([
@@ -230,8 +213,6 @@ defmodule Gladius.Gen do
   defp integer_gen(constraints) do
     lower = integer_lower(constraints)
     upper = integer_upper(constraints)
-    # Ensure lower <= upper (user could write gt?: 100, lte?: 10 — nonsensical
-    # but shouldn't crash the generator; StreamData will just generate nothing)
     StreamData.integer(lower..upper)
   end
 
@@ -254,17 +235,11 @@ defmodule Gladius.Gen do
     {min_len, max_len} =
       if exact_size, do: {exact_size, exact_size}, else: {min_len, max_len}
 
-    # :ascii ensures byte_size(v) == String.length(v), keeping the generator
-    # consistent with the byte_size-based min_length/max_length/size? constraints.
-    # Users who need Unicode strings should supply an explicit :gen override.
     base = StreamData.string(:ascii, min_length: min_len, max_length: max_len)
 
     case Keyword.get(constraints, :format) do
       nil   -> base
-      regex ->
-        # Can't reverse a regex — filter instead. Third arg is an integer
-        # (max_consecutive_failures), not a keyword list.
-        StreamData.filter(base, &Regex.match?(regex, &1), 1_000)
+      regex -> StreamData.filter(base, &Regex.match?(regex, &1), 1_000)
     end
   end
 

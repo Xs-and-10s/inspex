@@ -184,4 +184,72 @@ defmodule Gladius.Schema do
         }
 
   defstruct keys: [], open?: false, message: nil
-end
+
+    # ---------------------------------------------------------------------------
+    # Introspection
+    # ---------------------------------------------------------------------------
+
+    @type field_descriptor :: %{name: atom(), required: boolean(), spec: term()}
+
+    @doc """
+    Returns field descriptors for a schema in declaration order.
+
+    Each descriptor is `%{name: atom(), required: boolean(), spec: conformable()}`.
+    Accepts any conformable wrapping a `%Gladius.Schema{}` — `validate/2`,
+    `default/2`, `transform/2`, `maybe/1`, and `ref/1` are all unwrapped
+    transparently. Raises `ArgumentError` if no schema is found.
+    """
+    @spec fields(term()) :: [field_descriptor()]
+    def fields(conformable) do
+      %__MODULE__{keys: keys} = unwrap!(conformable)
+      Enum.map(keys, fn %Gladius.SchemaKey{name: n, spec: s, required: r} ->
+        %{name: n, required: r, spec: s}
+      end)
+    end
+
+    @doc "Returns only required field descriptors, in declaration order."
+    @spec required_fields(term()) :: [field_descriptor()]
+    def required_fields(c), do: c |> fields() |> Enum.filter(& &1.required)
+
+    @doc "Returns only optional field descriptors, in declaration order."
+    @spec optional_fields(term()) :: [field_descriptor()]
+    def optional_fields(c), do: c |> fields() |> Enum.reject(& &1.required)
+
+    @doc "Returns field names in declaration order."
+    @spec field_names(term()) :: [atom()]
+    def field_names(c), do: c |> fields() |> Enum.map(& &1.name)
+
+    @doc "Returns `true` if the conformable resolves to a `%Gladius.Schema{}`."
+    @spec schema?(term()) :: boolean()
+    def schema?(c), do: match?(%__MODULE__{}, unwrap(c))
+
+    @doc "Returns `true` if the schema is open (extra keys pass through)."
+    @spec open?(term()) :: boolean()
+    def open?(c) do
+      case unwrap(c) do
+        %__MODULE__{open?: v} -> v
+        _                     -> false
+      end
+    end
+
+    defp unwrap(%__MODULE__{} = s),          do: s
+    defp unwrap(%Gladius.Default{spec: i}),  do: unwrap(i)
+    defp unwrap(%Gladius.Transform{spec: i}), do: unwrap(i)
+    defp unwrap(%Gladius.Maybe{spec: i}),    do: unwrap(i)
+    defp unwrap(%Gladius.Validate{spec: i}), do: unwrap(i)
+    defp unwrap(%Gladius.Ref{name: n}) do
+      unwrap(Gladius.Registry.fetch!(n))
+    rescue
+      _ -> nil
+    end
+    defp unwrap(_), do: nil
+
+    defp unwrap!(c) do
+      case unwrap(c) do
+        %__MODULE__{} = s -> s
+        nil ->
+          raise ArgumentError,
+            "expected a %Gladius.Schema{} or a conformable wrapping one, got: #{inspect(c)}"
+      end
+    end
+  end

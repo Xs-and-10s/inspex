@@ -46,8 +46,7 @@ defmodule Gladius.EctoEmbedTest do
         address: %{street: "1 Main", city: "Culpeper", zip: "22701"}
       })
 
-      assert {:parameterized, Ecto.Embedded,
-              %Ecto.Embedded{cardinality: :one, field: :address}} = cs.types[:address]
+      assert {:embed, %Ecto.Embedded{cardinality: :one, field: :address}} = cs.types[:address]
     end
 
     test "list_of(schema) field has :many embed type" do
@@ -61,8 +60,7 @@ defmodule Gladius.EctoEmbedTest do
         tags: [%{name: "elixir"}, %{name: "ecto"}]
       })
 
-      assert {:parameterized, Ecto.Embedded,
-              %Ecto.Embedded{cardinality: :many, field: :tags}} = cs.types[:tags]
+      assert {:embed, %Ecto.Embedded{cardinality: :many, field: :tags}} = cs.types[:tags]
     end
 
     test "non-schema fields keep primitive types" do
@@ -93,8 +91,7 @@ defmodule Gladius.EctoEmbedTest do
         address: %{street: "1 Main", city: "Culpeper", zip: "22701"}
       })
 
-      assert {:parameterized, Ecto.Embedded,
-              %Ecto.Embedded{cardinality: :one}} = cs.types[:address]
+      assert {:embed, %Ecto.Embedded{cardinality: :one}} = cs.types[:address]
     end
 
     test "nested schema wrapped in maybe has :one embed type" do
@@ -108,8 +105,7 @@ defmodule Gladius.EctoEmbedTest do
         address: %{street: "1 Main", city: "Culpeper", zip: "22701"}
       })
 
-      assert {:parameterized, Ecto.Embedded,
-              %Ecto.Embedded{cardinality: :one}} = cs.types[:address]
+      assert {:embed, %Ecto.Embedded{cardinality: :one}} = cs.types[:address]
     end
   end
 
@@ -449,9 +445,88 @@ defmodule Gladius.EctoEmbedTest do
         address: %{street: "1 Main", city: "Culpeper", zip: "22701"}
       })
 
-      assert {:parameterized, Ecto.Embedded,
-              %Ecto.Embedded{cardinality: :one}} = cs.types[:address]
+      assert {:embed, %Ecto.Embedded{cardinality: :one}} = cs.types[:address]
       assert cs.valid?
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Auto-seed — changeset/2 with no base arg
+  # ---------------------------------------------------------------------------
+
+  describe "auto-seed (changeset/2 with no base)" do
+    test "single nested schema field is seeded with %{} in data" do
+      s = schema(%{
+        required(:name)    => string(:filled?),
+        required(:address) => address_schema()
+      })
+
+      cs = Gladius.Ecto.changeset(s, %{name: "Mark"})
+      # data must contain :address so inputs_for can find it
+      assert Map.has_key?(cs.data, :address)
+      assert cs.data.address == %{}
+    end
+
+    test "list_of(schema) field is seeded with [] in data" do
+      s = schema(%{
+        required(:name) => string(:filled?),
+        required(:tags) => list_of(tag_schema())
+      })
+
+      cs = Gladius.Ecto.changeset(s, %{name: "Mark"})
+      assert Map.has_key?(cs.data, :tags)
+      assert cs.data.tags == []
+    end
+
+    test "non-embed fields are not in the seed" do
+      s = schema(%{
+        required(:name)    => string(:filled?),
+        required(:age)     => integer(),
+        required(:address) => address_schema()
+      })
+
+      cs = Gladius.Ecto.changeset(s, %{name: "Mark"})
+      # only embed fields get seeded
+      refute Map.has_key?(cs.data, :name)
+      refute Map.has_key?(cs.data, :age)
+      assert Map.has_key?(cs.data, :address)
+    end
+
+    test "valid input still produces valid changeset with auto-seed" do
+      cs = Gladius.Ecto.changeset(user_schema(), %{
+        name:    "Mark",
+        address: %{street: "1 Main", city: "Culpeper", zip: "22701"}
+      })
+
+      assert cs.valid?
+    end
+
+    test "invalid input still produces invalid changeset with auto-seed" do
+      cs = Gladius.Ecto.changeset(user_schema(), %{
+        name:    "Mark",
+        address: %{street: "1 Main", city: "Culpeper", zip: "bad"}
+      })
+
+      refute cs.valid?
+    end
+
+    test "explicit base overrides auto-seed" do
+      s = schema(%{
+        required(:name)    => string(:filled?),
+        required(:address) => address_schema()
+      })
+
+      explicit_base = %{address: %{street: "pre-filled"}, extra: "kept"}
+      cs = Gladius.Ecto.changeset(s, %{name: "Mark"}, explicit_base)
+
+      # explicit base is used as-is, not overwritten by auto-seed
+      assert cs.data == explicit_base
+    end
+
+    test "user_schema/0 auto-seeds both address and tags" do
+      cs = Gladius.Ecto.changeset(user_schema(), %{})
+      assert cs.data.address == %{}
+      assert cs.data.tags    == []
     end
   end
 end

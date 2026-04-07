@@ -106,16 +106,32 @@ defmodule Gladius.Ecto do
       update workflows.
     """
     @spec changeset(Schema.t(), map(), map() | struct()) :: Ecto.Changeset.t()
-    def changeset(gladius_schema, params, base \\ %{})
+    def changeset(gladius_schema, params, base \\ :auto)
+
+    # Auto-seed: when no base is provided, infer empty seeds for all embed fields
+    # so inputs_for can find them in changeset.data without a KeyError.
+    # %{address: %{}, tags: []} — callers no longer need to supply this manually.
+    def changeset(%Schema{} = gladius_schema, params, :auto) do
+      seed = infer_embed_seed(gladius_schema)
+      changeset(gladius_schema, params, seed)
+    end
 
     def changeset(%Schema{} = gladius_schema, params, base) when is_map(params) do
       types  = infer_types(gladius_schema)
       fields = Map.keys(types)
       data   = {base, types}
 
+      # Strip Phoenix LiveView's internal bookkeeping keys before processing.
+      # LiveView injects _unused_*, _persistent_id, and _target into form params.
+      # Left in place they produce mixed atom/string key maps after atomize_keys,
+      # which causes Ecto.Changeset.cast/4 to raise CastError.
+      # This is safe for all consumers — no legitimate param starts with _unused
+      # or _persistent, and _target is a LiveView-only meta key.
+      cleaned_params = clean_phoenix_params(params)
+
       # Normalise string keys → atoms before conforming.
       # Phoenix sends all form/JSON params as string-keyed maps.
-      atom_params = atomize_keys(params)
+      atom_params = atomize_keys(cleaned_params)
 
       # Fields whose spec is (or wraps) a nested %Schema{} — their errors are
       # handled by recursive nested changesets rather than the parent's errors list.
@@ -162,37 +178,48 @@ defmodule Gladius.Ecto do
 
     # Iterate schema keys; for each field whose spec resolves to a nested schema
     # or list_of(schema), build nested changeset(s) and put into parent changes.
+    # Nested changesets are ALWAYS placed in changes (even for empty/absent params)
+    # so that phoenix_ecto's inputs_for can find them. If it finds a plain map in
+    # data instead, it calls Ecto.Changeset.change/2 on it which raises.
     defp apply_nested(cs, keys, atom_params) do
-      Enum.reduce(keys, cs, fn %SchemaKey{name: name, spec: spec, required: required}, acc ->
-        raw = Map.get(atom_params, name)
+      Enum.reduce(keys, cs, fn %SchemaKey{name: name, spec: spec}, acc ->
+        raw  = Map.get(atom_params, name)
+        seed = Map.get(acc.data, name)   # seeded base data (may be %{} or [])
 
         cond do
           # ── Single nested schema ───────────────────────────────────────────
-          match?(%Schema{}, unwrap_to_schema(spec)) and is_map(raw) and not is_struct(raw) ->
+          # Build a nested changeset when:
+          #   a) user provided map params for this field, OR
+          #   b) spec is NOT Maybe-wrapped (so we always seed for inputs_for)
+          # Skip when Maybe-wrapped AND raw is nil — nil is a valid value there.
+          unwrap_to_schema(spec) != nil and (is_map(raw) or not maybe_wrapped?(spec)) ->
             nested_schema = unwrap_to_schema(spec)
-            nested_cs     = changeset(nested_schema, raw)
+            nested_raw    = if is_map(raw) and not is_struct(raw), do: raw,
+                            else: if(is_map(seed), do: seed, else: %{})
+            nested_cs     = changeset(nested_schema, nested_raw)
+            # Only invalidate parent if user actually submitted bad nested data.
             acc
-            |> Ecto.Changeset.put_change(name, nested_cs)
-            |> invalidate_if(not nested_cs.valid?)
+            |> Ecto.Changeset.force_change(name, nested_cs)
+            |> invalidate_if(is_map(raw) and not nested_cs.valid?)
 
           # ── list_of(schema) — many embed ───────────────────────────────────
-          unwrap_list_schema(spec) != nil and is_list(raw) ->
+          # Use params list if provided, seed list otherwise (may be []).
+          # force_change instead of put_change: Ecto suppresses put_change when
+          # the new value equals data (e.g. [] == [] from auto-seed).
+          unwrap_list_schema(spec) != nil ->
             element_schema = unwrap_list_schema(spec)
-            nested_list    = Enum.map(raw, &changeset(element_schema, &1))
-            all_valid?     = Enum.all?(nested_list, & &1.valid?)
+            list           = cond do
+              is_list(raw)  -> raw
+              is_list(seed) -> seed
+              true          -> []
+            end
+            nested_list = Enum.map(list, &changeset(element_schema, &1))
+            all_valid?  = Enum.all?(nested_list, & &1.valid?)
             acc
-            |> Ecto.Changeset.put_change(name, nested_list)
-            |> invalidate_if(not all_valid?)
+            |> Ecto.Changeset.force_change(name, nested_list)
+            |> invalidate_if(is_list(raw) and not all_valid?)
 
-          # ── list_of(schema) with empty list ────────────────────────────────
-          unwrap_list_schema(spec) != nil and raw == [] ->
-            Ecto.Changeset.put_change(acc, name, [])
-
-          # ── Required nested field absent — error already in top_errors ─────
-          required and is_nil(raw) ->
-            acc
-
-          # ── Optional nested field absent — nothing to do ───────────────────
+          # ── Non-embed field — already handled by cast ──────────────────────
           true ->
             acc
         end
@@ -202,6 +229,25 @@ defmodule Gladius.Ecto do
     # Marks the changeset invalid when the condition is true.
     defp invalidate_if(cs, false), do: cs
     defp invalidate_if(cs, true),  do: Map.put(cs, :valid?, false)
+
+    # Infers an empty-but-present seed map for all embed fields in a schema.
+    # Without this, phoenix_ecto's inputs_for raises KeyError when looking up
+    # the embed field in changeset.data.
+    defp infer_embed_seed(%Schema{keys: keys}) do
+      Map.new(keys, fn %SchemaKey{name: name, spec: spec} ->
+        seed =
+          cond do
+            # Don't seed Maybe-wrapped schemas — nil is valid, no empty sub-form needed
+            maybe_wrapped?(spec) -> nil
+            unwrap_to_schema(spec) != nil -> %{}
+            unwrap_list_schema(spec) != nil -> []
+            true -> nil
+          end
+        {name, seed}
+      end)
+      |> Enum.reject(fn {_, v} -> is_nil(v) end)
+      |> Map.new()
+    end
 
     # After nested changesets are placed in changes, overwrite the types map
     # so Phoenix's inputs_for/4 and Ecto.Changeset.traverse_errors/2 recognise
@@ -218,6 +264,11 @@ defmodule Gladius.Ecto do
     # -------------------------------------------------------------------------
     # Schema unwrapping
     # -------------------------------------------------------------------------
+
+    # Returns true if the outermost wrapper of a spec is %Maybe{}.
+    # Used to skip building nested changesets when nil is a valid value.
+    defp maybe_wrapped?(%Maybe{}), do: true
+    defp maybe_wrapped?(_),        do: false
 
     # Returns the nested %Schema{} if the spec is (or wraps) one; nil otherwise.
     defp unwrap_to_schema(%Schema{} = s),           do: s
@@ -281,9 +332,12 @@ defmodule Gladius.Ecto do
     end
     defp embed_cardinality(_), do: nil
 
-    # Build a parameterized Ecto.Embedded type for inputs_for compatibility
+    # Build an {:embed, %Ecto.Embedded{}} type entry for inputs_for compatibility.
+    # phoenix_ecto's inputs_for matches on {:embed, struct} or {:assoc, struct},
+    # NOT on {:parameterized, Ecto.Embedded, struct} — that format is for
+    # Ecto.ParameterizedType, which is a different mechanism entirely.
     defp embed_type(cardinality, field) do
-      {:parameterized, Ecto.Embedded, %Ecto.Embedded{
+      {:embed, %Ecto.Embedded{
         cardinality: cardinality,
         field:       field,
         owner:       nil,
@@ -340,6 +394,29 @@ defmodule Gladius.Ecto do
     # -------------------------------------------------------------------------
     # Key normalisation
     # -------------------------------------------------------------------------
+
+    # Strips Phoenix LiveView form bookkeeping keys recursively.
+    # _unused_* — shadow inputs that track which fields have been touched
+    # _persistent_id — identity key for list embed items
+    # _target — top-level event meta (which field triggered phx-change)
+    defp clean_phoenix_params(params) when is_map(params) do
+      params
+      |> Enum.reject(fn {k, _} ->
+        s = to_string(k)
+        String.starts_with?(s, "_unused") or
+        String.starts_with?(s, "_persistent") or
+        s == "_target"
+      end)
+      |> Map.new(fn {k, v} ->
+        {k, clean_phoenix_params(v)}
+      end)
+    end
+
+    defp clean_phoenix_params(list) when is_list(list) do
+      Enum.map(list, &clean_phoenix_params/1)
+    end
+
+    defp clean_phoenix_params(other), do: other
 
     defp atomize_keys(params) when is_map(params) do
       Map.new(params, fn

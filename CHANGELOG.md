@@ -7,6 +7,194 @@ Gladius adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.5.0] — Unreleased
+
+### Added
+
+#### Schema introspection — `Gladius.Schema`
+
+New module `Gladius.Schema` with runtime introspection functions. All functions
+accept any conformable wrapping a `%Gladius.Schema{}` — `validate/2`, `default/2`,
+`transform/2`, `maybe/1`, and `ref/1` are unwrapped transparently.
+
+```elixir
+import Gladius
+
+s = schema(%{
+  required(:name)  => string(:filled?),
+  required(:email) => string(:filled?, format: ~r/@/),
+  optional(:role)  => atom(in?: [:admin, :user])
+})
+
+Gladius.Schema.fields(s)
+#=> [%{name: :name, required: true, spec: ...},
+#=>  %{name: :email, required: true, spec: ...},
+#=>  %{name: :role, required: false, spec: ...}]
+
+Gladius.Schema.field_names(s)      #=> [:name, :email, :role]
+Gladius.Schema.required_fields(s)  #=> [%{name: :name, ...}, %{name: :email, ...}]
+Gladius.Schema.optional_fields(s)  #=> [%{name: :role, ...}]
+Gladius.Schema.schema?(s)          #=> true
+Gladius.Schema.open?(s)            #=> false
+```
+
+Useful for admin UI generation, OpenAPI/JSON Schema export, and dynamic form building.
+
+### Fixed
+
+#### `Gladius.Ecto` — battle-tested against a real Phoenix LiveView app
+
+A full integration test against Phoenix 1.8 / LiveView 1.1 / phoenix_ecto 4.7
+revealed and fixed several issues. All fixes are in `Gladius.Ecto` — application
+code does not change.
+
+**`_unused_*` / `_persistent_id` params caused `CastError`**
+
+Phoenix LiveView injects internal bookkeeping keys into form params:
+`_unused_<field>` (tracks touched state), `_persistent_id` (list embed identity),
+and `_target` (which field triggered `phx-change`). After partial atomization by
+`Gladius.Ecto`, these produced mixed atom/string key maps that Ecto rejected with
+`CastError`. `Gladius.Ecto.changeset/2-3` now strips these keys automatically
+before conforming. Application code does not need a `clean_params` helper.
+
+**Auto-seed for embed fields**
+
+`changeset/2` (no explicit base) now infers empty seeds for embed fields:
+- `%Schema{}` fields → `%{}` in `changeset.data`
+- `list_of(schema)` fields → `[]` in `changeset.data`
+- `maybe(schema)` fields → not seeded (nil is a valid value)
+
+Without seeds, `phoenix_ecto`'s `inputs_for` raises `KeyError` when looking up
+the embed field in `changeset.data`. Application code no longer needs to pass
+`%{address: %{}, tags: []}` as the base argument.
+
+**`{:embed, %Ecto.Embedded{}}` not `{:parameterized, Ecto.Embedded, ...}`**
+
+The embed type injected into `changeset.types` was using the wrong tag. `phoenix_ecto`'s
+`inputs_for` matches on `{:embed, struct}` or `{:assoc, struct}` — not on
+`{:parameterized, Ecto.Embedded, struct}`. Fixed to use the correct tag.
+
+**`apply_nested` always populates `changes` for embed fields**
+
+Nested changesets are now always placed in `changeset.changes` (not just when params
+include the field). This ensures `inputs_for` always finds an `%Ecto.Changeset{}`
+in `changes` rather than falling back to the plain `%{}` in `data`, which caused
+`Ecto.Changeset.change/2` to raise `FunctionClauseError`.
+
+**`force_change` instead of `put_change` for embed fields**
+
+`Ecto.Changeset.put_change/3` silently skips when the new value equals the
+existing data value (e.g. `put_change(cs, :tags, [])` when `cs.data.tags == []`).
+This caused empty list embeds to disappear from `changes`. `force_change/3` is
+now used for all embed fields.
+
+**`maybe(schema)` fields handled correctly**
+
+A spec wrapped in `maybe/1` is no longer auto-seeded or always put in `changes`.
+When the field is absent from params, it is omitted — nil is a valid value for
+`maybe`-wrapped fields and no sub-form should be rendered.
+
+### Documentation
+
+Added a full Phoenix LiveView worked example to the Ecto Integration section,
+documenting five required patterns:
+
+1. **Schemas as functions** — never `@module_attr` (anonymous functions are not escapable)
+2. **`as:` on the form** — `<.form for={@form} as={:user}>` (required for schemaless changesets)
+3. **`to_form/2` in assigns** — store `%Phoenix.HTML.Form{}`, not a raw changeset
+4. **`_target`-based error filtering** — show errors only for the touched field during `phx-change`
+5. **Params are cleaned automatically** — no application-level param stripping needed
+
+---
+
+## [0.4.0] — Unreleased
+
+### Added
+
+#### Schema extension — `extend/2` and `extend/3`
+
+`extend/2` builds a new `%Schema{}` from an existing one by merging in additional
+or overriding keys. No structs were added — the output is a plain `%Schema{}`.
+
+```elixir
+base = schema(%{
+  required(:name)  => string(:filled?),
+  required(:email) => string(:filled?, format: ~r/@/),
+  required(:age)   => integer(gte?: 0)
+})
+
+create = extend(base, %{required(:password) => string(min_length: 8)})
+update = extend(base, %{optional(:role) => atom(in?: [:admin, :user])})
+patch  = selection(update, [:name, :email, :age, :role])
+```
+
+Semantics:
+- Extension keys that override a base key replace the spec and `required?` flag
+  **in-place** — the key stays at its original position in the schema
+- New extension keys are appended after all base keys
+- `open?` is inherited from the base schema; override with `extend/3` `open:` opt
+- Does not mutate the base — always returns a new `%Schema{}`
+- `extend/2` can be chained — the result of `extend` can be extended again
+- All coercions, transforms, defaults, and custom messages on the original spec
+  are replaced when a key is overridden (the extension key's spec is used as-is)
+
+#### Ecto nested embed support
+
+`Gladius.Ecto.changeset/2-3` now builds proper nested `%Ecto.Changeset{}` values
+for fields whose spec is (or wraps) a `%Gladius.Schema{}` or `list_of(schema(...))`,
+and registers those fields with Ecto embedded types in `cs.types`. This makes
+nested changeset fields compatible with Phoenix `inputs_for/4` in LiveView.
+
+**Type declarations injected after cast:**
+
+- `%Schema{}` field → `{:parameterized, Ecto.Embedded, %Ecto.Embedded{cardinality: :one, field: name}}`
+- `list_of(schema)` field → `{:parameterized, Ecto.Embedded, %Ecto.Embedded{cardinality: :many, field: name}}`
+
+Embed types are injected **after** `Ecto.Changeset.cast/4` (which uses `:map` for
+safety) to avoid `Ecto.Type.cast_fun/1` raising on unknown parameterized types.
+
+**List of embedded schemas:**
+
+```elixir
+schema(%{
+  required(:name) => string(:filled?),
+  required(:tags) => list_of(schema(%{required(:name) => string(:filled?)}))
+})
+
+cs = Gladius.Ecto.changeset(s, params)
+cs.changes.tags  #=> [%Ecto.Changeset{}, ...]
+cs.types[:tags]  #=> {:parameterized, Ecto.Embedded, %Ecto.Embedded{cardinality: :many}}
+```
+
+#### `Gladius.Ecto.traverse_errors/2`
+
+New public function that recursively collects errors from Gladius-built nested
+changesets. Use this instead of `Ecto.Changeset.traverse_errors/2` — Ecto's
+built-in only recurses into fields whose type is a declared embed or association,
+and does not find errors in Gladius nested changesets.
+
+```elixir
+Gladius.Ecto.traverse_errors(cs, fn {msg, _} -> msg end)
+#=> %{name: ["can't be blank"], address: %{zip: ["must be exactly 5 characters"]}}
+#   tags: [%{}, %{name: ["must be filled"]}]   # list form for many embeds
+```
+
+### Fixed
+
+- `Gladius.Ecto` — string-keyed params inside nested maps and lists now atomize
+  recursively. Previously `%{"address" => %{"zip" => "bad"}}` and
+  `[%{"name" => "x"}]` kept string keys in nested positions, causing Gladius
+  schemas (which use atom keys) to report all nested required fields as missing.
+
+### Changed
+
+- `Gladius.Ecto.changeset/2-3` — nested schema fields now produce `%Ecto.Changeset{}`
+  values in `changes` instead of plain maps, and embed type entries in `types`.
+  Existing code that accessed `cs.changes.nested_field` as a plain map will need
+  to access it as a changeset: `cs.changes.nested_field.changes`.
+
+---
+
 ## [0.3.0] — Unreleased
 
 ### Added
@@ -327,6 +515,8 @@ First public release.
 
 ---
 
+[0.5.0]: https://github.com/Xs-and-10s/gladius/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/Xs-and-10s/gladius/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Xs-and-10s/gladius/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Xs-and-10s/gladius/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Xs-and-10s/gladius/releases/tag/v0.1.0

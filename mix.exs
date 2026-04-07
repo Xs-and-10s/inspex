@@ -1,7 +1,7 @@
 defmodule Gladius.MixProject do
   use Mix.Project
 
-  @version "0.4.1"
+  @version "0.5.1"
   @source_url "https://github.com/Xs-and-10s/gladius"
 
   def project do
